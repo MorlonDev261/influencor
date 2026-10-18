@@ -99,6 +99,13 @@ void main() {
           'https://reseller.poma-original.com/about');
       expect(ResellerConfig.isTrusted(ResellerConfig.aboutUri), isTrue);
     });
+
+    test('the theme is pushed to the site as light/dark only', () {
+      final script = ResellerConfig.themePush('dark');
+      expect(script, contains("window.__influencorTheme = 'dark'"));
+      expect(script, contains("new CustomEvent('influencor:theme'"));
+      expect(() => ResellerConfig.themePush('blue'), throwsA(isA<AssertionError>()));
+    });
   });
 
   group('mode badge', () {

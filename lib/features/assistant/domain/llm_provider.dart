@@ -128,3 +128,18 @@ enum LlmProviderKind {
   static LlmProviderKind byName(Object? name) => LlmProviderKind.values
       .firstWhere((k) => k.name == name, orElse: () => LlmProviderKind.openai);
 }
+
+/// Whether [url] may receive the API key and the conversation: HTTPS, or
+/// plain HTTP only to this device (a local model such as Ollama or
+/// LM Studio). Anything else would send them readable on the network.
+bool isSecureEndpoint(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || uri.host.isEmpty) return false;
+  if (uri.scheme == 'https') return true;
+  if (uri.scheme != 'http') return false;
+  final host = uri.host.toLowerCase();
+  return host == 'localhost' ||
+      host.endsWith('.localhost') ||
+      host == '::1' ||
+      RegExp(r'^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(host);
+}

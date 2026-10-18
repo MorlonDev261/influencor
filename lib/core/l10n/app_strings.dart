@@ -104,6 +104,30 @@ class AppStrings {
         mg: 'Resaka lava: tsy alefa amin’ny modely intsony ny fifanakalozana '
             'taloha indrindra.',
       );
+  String get llmInsecureUrl => _t(
+      'Adresse refusée : la clé API et la conversation passeraient en clair '
+          'sur le réseau. Utilisez https:// (http:// seulement pour un modèle '
+          'local : localhost, 127.0.0.1).',
+      'Address refused: the API key and the conversation would travel '
+          'unencrypted. Use https:// (http:// only for a local model: '
+          'localhost, 127.0.0.1).',
+      mg: 'Adiresy nolavina: handeha tsy voaaro amin’ny tambajotra ny lakile '
+          'API sy ny resaka. Ampiasao https:// (http:// ho an’ny modely eo '
+          'an-toerana ihany: localhost, 127.0.0.1).');
+  String get keysInPlainTextTitle =>
+      _t('Clé API non protégée', 'API key not protected',
+          mg: 'Lakile API tsy voaaro');
+  String get keysInPlainTextMessage => _t(
+      'Le coffre sécurisé du système est indisponible sur cet appareil : la '
+          'clé est enregistrée en clair dans les fichiers de l’app (jamais '
+          'dans votre dossier de travail). Elle sera déplacée dans le coffre '
+          'dès qu’il fonctionnera.',
+      'The system’s secure storage is unavailable on this device: the key is '
+          'saved in clear in the app’s files (never in your workspace). It '
+          'moves to the secure storage as soon as that works.',
+      mg: 'Tsy misy ny fitahirizana voaaro an’ny rafitra amin’ity fitaovana '
+          'ity: voatahiry tsy miafina ao amin’ny rakitry ny app ny lakile '
+          '(tsy ao amin’ny dossier fiasanao mihitsy).');
   String get llmTimeout => _t('Le service ne répond pas (délai dépassé).',
       'The service is not responding (timed out).',
       mg: 'Tsy mamaly ny service (lany fotoana).');
@@ -943,6 +967,35 @@ class AppStrings {
       'Appui long sur Modifier pour afficher / masquer',
       'Long press on Edit to show / hide',
       mg: 'Tsindrio ela ny Hanova hanehoana / hanafenana');
+  String get deleteTableColumn =>
+      _t('Supprimer la colonne', 'Delete column', mg: 'Fafao ny tsanganana');
+  String get deleteTableRow =>
+      _t('Supprimer la ligne', 'Delete row', mg: 'Fafao ny andalana');
+  String get tableColumnDeleted =>
+      _t('Colonne supprimée.', 'Column deleted.', mg: 'Voafafa ny tsanganana.');
+  String get tableRowDeleted =>
+      _t('Ligne supprimée.', 'Row deleted.', mg: 'Voafafa ny andalana.');
+  String get tableKeepsOneColumn => _t('Un tableau garde au moins une colonne.',
+      'A table keeps at least one column.',
+      mg: 'Tsy maintsy misy tsanganana iray farafahakeliny ny tabilao.');
+  String get dragToMove =>
+      _t('Maintenir et glisser pour déplacer', 'Hold and drag to move',
+          mg: 'Tazony ary sintony hamindrana');
+  String get defaultVisibleColumns =>
+      _t('Colonnes affichées par défaut', 'Columns shown by default',
+          mg: 'Tsanganana aseho foana');
+  String get longPressSaveForColumns => _t(
+      'Appui long : colonnes affichées par défaut',
+      'Long press: columns shown by default',
+      mg: 'Tsindrio ela: tsanganana aseho foana');
+  String get undo => _t('Annuler', 'Undo', mg: 'Averina');
+  String get done => _t('Terminé', 'Done', mg: 'Vita');
+  String get formulaPickHint => _t(
+      'Touchez une case pour l’ajouter à la formule',
+      'Tap a cell to add it to the formula',
+      mg: 'Tsindrio ny sela iray hampidirana azy ao amin’ny formule');
+  String get formulaColumn =>
+      _t('Colonne calculée', 'Calculated column', mg: 'Tsanganana kajy');
 
   // Rich-text formatting toolbar
   String get bold => _t('Gras', 'Bold', mg: 'Matevina');
@@ -1255,6 +1308,58 @@ class AppStrings {
           mg: 'Tsy mbola misy fihetsika');
   String get invalidAmount =>
       _t('Montant invalide', 'Invalid amount', mg: 'Tsy mety ny habetsahana');
+  String get currentSheet =>
+      _t('Feuille en cours', 'Current sheet', mg: 'Takelaka ankehitriny');
+  String get closedSheet =>
+      _t('Feuille clôturée', 'Closed sheet', mg: 'Takelaka voakatona');
+  String get sheetHistory => _t('Historique des feuilles', 'Sheet history',
+      mg: "Tantaran'ny takelaka");
+  String sheetSince(String date) =>
+      _t('Depuis le $date', 'Since $date', mg: 'Nanomboka ny $date');
+  String sheetPeriod(String from, String to) =>
+      _t('Du $from au $to', 'From $from to $to',
+          mg: "Tamin'ny $from hatramin'ny $to");
+  String sheetEntries(int n) =>
+      _t('$n opération(s)', '$n transaction(s)', mg: '$n fihetsika');
+  String get closeSheet =>
+      _t('Clôturer la feuille', 'Close sheet', mg: 'Hikatona ny takelaka');
+  String get closeSheetShort => _t('Clôturer', 'Close', mg: 'Hikatona');
+  String get closeSheetNeedsEntry => _t(
+      'Ajoutez une opération avant de clôturer',
+      'Add a transaction before closing',
+      mg: 'Manampia fihetsika aloha vao manakatona');
+  String get closeSheetTitle => _t('Clôturer la feuille ?', 'Close this sheet?',
+      mg: 'Hikatona ity takelaka ity?');
+  String closeSheetMessage(String start, String now, String balance) => _t(
+      'La feuille commencée le $start sera clôturée maintenant ($now) et '
+          'passera en lecture seule. Une nouvelle feuille démarre aussitôt, '
+          'avec le solde reporté ($balance).',
+      'The sheet started on $start will be closed now ($now) and become '
+          'read-only. A new sheet starts right away, with the balance carried '
+          'over ($balance).',
+      mg: 'Hokatonina izao ($now) ny takelaka nanomboka ny $start ary tsy '
+          'azo ovaina intsony. Misy takelaka vaovao manomboka avy hatrany, '
+          "miaraka amin'ny sola nafindra ($balance).");
+  String get sheetClosed => _t('Feuille clôturée, nouvelle feuille démarrée',
+      'Sheet closed, a new sheet has started',
+      mg: 'Voakatona ny takelaka, nanomboka ny takelaka vaovao');
+  String get sheetReadOnly =>
+      _t('Feuille clôturée : lecture seule', 'Closed sheet: read-only',
+          mg: 'Takelaka voakatona: vakiana ihany');
+  String get closingBalance =>
+      _t('Solde de clôture', 'Closing balance', mg: "Sola tamin'ny fikatonana");
+  String get openingBalance =>
+      _t('Solde reporté', 'Balance brought forward', mg: 'Sola nafindra');
+  String get ledgerTrend => _t('Évolution', 'Trend', mg: 'Fivoarana');
+  String get perDay => _t('Par jour', 'Per day', mg: "Isan'andro");
+  String get perWeek => _t('Par semaine', 'Per week', mg: 'Isan-kerinandro');
+  String get perMonth => _t('Par mois', 'Per month', mg: 'Isam-bolana');
+  String weekOf(String date) => _t('Semaine du $date', 'Week of $date',
+      mg: 'Herinandro nanomboka ny $date');
+  String ledgerChartLabel(String credit, String debit) => _t(
+      'Graphique des crédits ($credit) et des débits ($debit)',
+      'Chart of credits ($credit) and debits ($debit)',
+      mg: "Sarisary fidirana ($credit) sy fivoahan'ny vola ($debit)");
   String get newTask =>
       _t('Nouvelle tâche', 'New task', mg: 'Andraikitra vaovao');
   String get noTasks => _t('Aucune tâche pour le moment', 'No tasks yet',

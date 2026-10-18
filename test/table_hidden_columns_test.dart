@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:influencor/core/l10n/app_strings.dart';
 import 'package:influencor/features/library/application/library_providers.dart';
 import 'package:influencor/features/library/domain/table_document.dart';
 import 'package:influencor/features/library/presentation/table_screen.dart';
@@ -93,6 +94,137 @@ void main() {
       // Edit mode is active (cancel/close icon displayed, plus button appears)
       expect(find.byIcon(Icons.close), findsOneWidget);
       expect(find.byIcon(Icons.add), findsWidgets);
+    });
+  });
+
+  group('TableScreen editing: scroll, delete, reorder, default columns', () {
+    const path = '/workspace/edit.table';
+    TableDocument buildTable({int columns = 3}) => TableDocument(
+          columns: [
+            const TableColumnDef(id: 'c1', title: 'Nom'),
+            const TableColumnDef(id: 'c2', title: 'Ville'),
+            const TableColumnDef(id: 'c3', title: '[Secret]'),
+            for (var i = 4; i <= columns; i++)
+              TableColumnDef(id: 'c$i', title: 'Col $i'),
+          ],
+          rows: const [
+            TableRowData(id: 'r1', cells: {'c1': 'Jean', 'c2': 'Tana'}),
+            TableRowData(id: 'r2', cells: {'c1': 'Rivo', 'c2': 'Tulear'}),
+          ],
+        );
+
+    Future<void> pumpTable(WidgetTester tester, TableDocument table) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tableDocumentProvider(path).overrideWith((ref) => table),
+            appStringsProvider
+                .overrideWithValue(const AppStrings(Locale('fr'))),
+          ],
+          child: const MaterialApp(home: TableScreen(path: path)),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    double headerX(WidgetTester tester, String title) =>
+        tester.getTopLeft(find.text(title)).dx;
+
+    testWidgets('a wide table scrolls horizontally on a phone', (tester) async {
+      await pumpTable(tester, buildTable(columns: 8));
+      final last = find.text('Col 8');
+      expect(last, findsOneWidget);
+      expect(tester.getTopLeft(last).dx, greaterThan(400));
+
+      await tester.drag(find.text('Jean'), const Offset(-2000, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(last).dx, lessThan(400));
+    });
+
+    testWidgets('deleting a row and a column, with undo', (tester) async {
+      await pumpTable(tester, buildTable());
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pumpAndSettle();
+
+      // Header delete buttons come first, then one per row.
+      final deletes = find.byIcon(Icons.delete_outline);
+      expect(deletes, findsNWidgets(2 + 2));
+
+      // Delete row r1 (first row button, after the 2 header buttons).
+      await tester.tap(deletes.at(2));
+      await tester.pumpAndSettle();
+      expect(find.text('Jean'), findsNothing);
+      expect(find.text('Rivo'), findsOneWidget);
+
+      await tester.tap(find.text('Annuler'));
+      await tester.pumpAndSettle();
+      expect(find.text('Jean'), findsOneWidget);
+
+      // Delete column "Ville".
+      final deleteVille = find.byIcon(Icons.delete_outline).at(1);
+      await tester.ensureVisible(deleteVille);
+      await tester.pumpAndSettle();
+      await tester.tap(deleteVille);
+      await tester.pumpAndSettle();
+      expect(find.text('Ville'), findsNothing);
+      expect(find.text('Tana'), findsNothing);
+    });
+
+    testWidgets('long press on save lists columns to show by default',
+        (tester) async {
+      await pumpTable(tester, buildTable());
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.byIcon(Icons.save_outlined));
+      await tester.pumpAndSettle();
+      expect(find.text('Colonnes affichées par défaut'), findsOneWidget);
+      final secret = find.widgetWithText(CheckboxMenuButton, 'Secret');
+      final ville = find.widgetWithText(CheckboxMenuButton, 'Ville');
+      expect(tester.widget<CheckboxMenuButton>(secret).value, isFalse);
+      expect(tester.widget<CheckboxMenuButton>(ville).value, isTrue);
+
+      // Show "Secret" by default, hide "Ville": the menu stays open.
+      await tester.tap(secret);
+      await tester.pumpAndSettle();
+      await tester.tap(ville);
+      await tester.pumpAndSettle();
+      expect(tester.widget<CheckboxMenuButton>(secret).value, isTrue);
+      expect(tester.widget<CheckboxMenuButton>(ville).value, isFalse);
+
+      // Leave edit mode: "Secret" is now visible, "[Ville]" hidden.
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.text('Secret'), findsOneWidget);
+      expect(find.text('[Ville]'), findsNothing);
+      expect(find.text('Ville'), findsNothing);
+    });
+
+    testWidgets('dragging a column handle reorders the columns',
+        (tester) async {
+      await pumpTable(tester, buildTable());
+      expect(headerX(tester, 'Nom'), lessThan(headerX(tester, 'Ville')));
+
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pumpAndSettle();
+
+      final handle = find.byIcon(Icons.drag_indicator).first;
+      final target = tester.getCenter(find.text('Tana'));
+      final gesture = await tester.startGesture(tester.getCenter(handle));
+      await tester.pump(const Duration(milliseconds: 400));
+      await gesture.moveBy(const Offset(10, 0));
+      await tester.pump();
+      await gesture.moveTo(target);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(headerX(tester, 'Ville'), lessThan(headerX(tester, 'Nom')));
     });
   });
 }

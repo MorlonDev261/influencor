@@ -34,13 +34,13 @@ void main() {
       direction: LedgerDirection.debit,
     ));
     final reloaded = await AccountingStore(root.path).load();
-    expect(reloaded.fold<int>(0, (s, e) => s + e.signedAmount), 7500);
+    expect(reloaded.entries.fold<int>(0, (s, e) => s + e.signedAmount), 7500);
     expect(
         File(p.join(root.path, '.clipboard', 'accounting.json')).existsSync(),
         isTrue);
 
     await store.remove('a');
-    expect((await store.load()).single.id, 'b');
+    expect((await store.load()).entries.single.id, 'b');
   });
 
   test('each task is its own JSON file with text and checklist blocks',

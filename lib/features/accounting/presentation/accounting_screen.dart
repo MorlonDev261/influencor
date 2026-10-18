@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,19 +12,12 @@ import '../../../core/providers/edit_mode_provider.dart';
 import '../../../core/providers/workspace_providers.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../application/accounting_providers.dart';
+import '../domain/ledger.dart';
 import '../domain/ledger_entry.dart';
+import 'ledger_chart.dart';
+import 'ledger_format.dart';
 
-String formatAr(int value) {
-  final digits = value.abs().toString();
-  final grouped = digits.replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+(?!\d))'),
-    (_) => '\u00A0',
-  );
-  return '${value < 0 ? '-' : ''}$grouped\u00A0Ar';
-}
-
-String formatDate(DateTime d) =>
-    '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+export 'ledger_format.dart';
 
 extension on LedgerType {
   String text(AppStrings s) => switch (this) {
@@ -46,7 +41,10 @@ class AccountingScreen extends ConsumerStatefulWidget {
 class _AccountingScreenState extends ConsumerState<AccountingScreen> {
   LedgerAccount? _filter;
 
-  Future<void> _openEditor([LedgerEntry? entry]) async {
+  /// The sheet on screen; null follows the open (current) sheet.
+  String? _sheetId;
+
+  Future<void> _openEditor({LedgerEntry? entry, bool readOnly = false}) async {
     final strings = ref.read(appStringsProvider);
     final editing = ref.read(editModeProvider);
     final result = await showAppDialog<_EditorResult>(
@@ -54,7 +52,8 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
       builder: (_) => _EntryDialog(
         entry: entry,
         strings: strings,
-        startEditing: entry == null || editing,
+        startEditing: !readOnly && (entry == null || editing),
+        readOnly: readOnly,
       ),
     );
     if (result == null) return;
@@ -66,19 +65,40 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
     }
   }
 
+  Future<void> _closeSheet(Ledger ledger) async {
+    final s = ref.read(appStringsProvider);
+    final now = DateTime.now();
+    final ok = await showConfirmDialog(
+      context,
+      title: s.closeSheetTitle,
+      message: s.closeSheetMessage(
+        formatDate(ledger.current.start),
+        '${formatDate(now)} ${formatTime(now)}',
+        formatAr(ledger.totalsOf(ledger.current.id).closingTotal),
+      ),
+      confirmLabel: s.closeSheetShort,
+      cancelLabel: s.cancel,
+      confirmKey: const ValueKey('ledger-close-confirm'),
+    );
+    if (!ok || !mounted) return;
+    final closed = await ref.read(ledgerProvider.notifier).closeCurrentSheet();
+    if (!mounted || closed == null) return;
+    setState(() => _sheetId = null);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(s.sheetClosed)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final strings = ref.watch(appStringsProvider);
     final hasWorkspace = ref.watch(workspaceRootProvider) != null;
     final editing = ref.watch(editModeProvider);
-    final entries = ref.watch(ledgerProvider).value ?? const <LedgerEntry>[];
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    final balance = entries.fold<int>(0, (s, e) => s + e.signedAmount);
-    int balanceOf(LedgerAccount a) => entries
-        .where((e) => e.account == a)
-        .fold<int>(0, (s, e) => s + e.signedAmount);
+    final ledger = ref.watch(ledgerProvider).value ?? Ledger.empty();
+    final sheet = ledger.sheetById(_sheetId) ?? ledger.current;
+    final isCurrent = sheet.isOpen;
+    final entries = ledger.entriesOf(sheet.id);
+    final totals = ledger.totalsOf(sheet.id);
     final shown = _filter == null
         ? entries
         : entries.where((e) => e.account == _filter).toList();
@@ -97,7 +117,7 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
           if (hasWorkspace) const EditModeButton(),
         ],
       ),
-      floatingActionButton: hasWorkspace && editing
+      floatingActionButton: hasWorkspace && editing && isCurrent
           ? FloatingActionButton.extended(
               onPressed: () => _openEditor(),
               icon: const Icon(Icons.add),
@@ -109,126 +129,379 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
               icon: Icons.folder_off_outlined,
               title: strings.needWorkspace,
             )
-          : Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        strings.availableBalance,
-                        style: theme.textTheme.labelLarge
-                            ?.copyWith(color: scheme.onPrimaryContainer),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        formatAr(balance),
-                        key: const ValueKey('ledger-balance'),
-                        style: theme.textTheme.headlineMedium?.copyWith(
-                          color: balance < 0
-                              ? scheme.error
-                              : scheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w800,
+          : LayoutBuilder(builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              final wide = width >= 840;
+              // Centre the content on large screens instead of stretching it.
+              final side = math.max(16.0, (width - 1080) / 2);
+              final balance = _BalanceCard(
+                strings: strings,
+                totals: totals,
+                isCurrent: isCurrent,
+                showOpening: ledger.sheets.first.id != sheet.id,
+              );
+              final hasChart = shown.isNotEmpty;
+              final chart = LedgerChartCard(
+                entries: shown,
+                strings: strings,
+                from: sheet.start,
+                to: sheet.end ?? DateTime.now(),
+                height: wide ? 200 : 170,
+              );
+              return CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(side, 12, side, 4),
+                    sliver: SliverList.list(
+                      children: [
+                        _SheetBar(
+                          strings: strings,
+                          ledger: ledger,
+                          sheet: sheet,
+                          canEdit: editing,
+                          onSelect: (id) => setState(() =>
+                              _sheetId = id == ledger.current.id ? null : id),
+                          onClose: () => _closeSheet(ledger),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 2,
+                        const SizedBox(height: 12),
+                        if (wide && hasChart)
+                          IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(flex: 2, child: balance),
+                                const SizedBox(width: 12),
+                                Expanded(flex: 3, child: chart),
+                              ],
+                            ),
+                          )
+                        else ...[
+                          balance,
+                          if (hasChart) ...[
+                            const SizedBox(height: 12),
+                            chart,
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: 52,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.symmetric(
+                            horizontal: side - 4, vertical: 6),
                         children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ChoiceChip(
+                              label: Text(strings.all),
+                              selected: _filter == null,
+                              onSelected: (_) => setState(() => _filter = null),
+                            ),
+                          ),
                           for (final a in LedgerAccount.values)
-                            Text(
-                              '${a.text(strings)}: ${formatAr(balanceOf(a))}',
-                              style: theme.textTheme.bodySmall
-                                  ?.copyWith(color: scheme.onPrimaryContainer),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: ChoiceChip(
+                                label: Text(a.text(strings)),
+                                selected: _filter == a,
+                                onSelected: (_) => setState(() => _filter = a),
+                              ),
                             ),
                         ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-                SizedBox(
-                  height: 48,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: ChoiceChip(
-                          label: Text(strings.all),
-                          selected: _filter == null,
-                          onSelected: (_) => setState(() => _filter = null),
+                  if (shown.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: EmptyState(
+                        icon: Icons.account_balance_wallet_outlined,
+                        title: strings.noTransactions,
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(side - 16, 0, side - 16, 88),
+                      sliver: SliverList.separated(
+                        itemCount: shown.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, i) => _EntryTile(
+                          entry: shown[i],
+                          strings: strings,
+                          onTap: () => _openEditor(
+                              entry: shown[i], readOnly: !isCurrent),
                         ),
                       ),
-                      for (final a in LedgerAccount.values)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: ChoiceChip(
-                            label: Text(a.text(strings)),
-                            selected: _filter == a,
-                            onSelected: (_) => setState(() => _filter = a),
-                          ),
-                        ),
-                    ],
+                    ),
+                ],
+              );
+            }),
+    );
+  }
+}
+
+/// Which sheet is on screen, the sheet history and the "close" action.
+class _SheetBar extends StatelessWidget {
+  const _SheetBar({
+    required this.strings,
+    required this.ledger,
+    required this.sheet,
+    required this.canEdit,
+    required this.onSelect,
+    required this.onClose,
+  });
+
+  final AppStrings strings;
+  final Ledger ledger;
+  final LedgerSheet sheet;
+  final bool canEdit;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onClose;
+
+  String _period(LedgerSheet s) => s.isOpen
+      ? strings.sheetSince(formatDate(s.start))
+      : strings.sheetPeriod(formatDate(s.start), formatDate(s.end!));
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final s = strings;
+    final isCurrent = sheet.isOpen;
+    final count = ledger.entriesOf(sheet.id).length;
+    final history = ledger.sheets.length > 1
+        ? PopupMenuButton<String>(
+            key: const ValueKey('ledger-sheets'),
+            tooltip: s.sheetHistory,
+            icon: const Icon(Icons.history_rounded),
+            onSelected: onSelect,
+            itemBuilder: (_) => [
+              for (final item in ledger.sheets.reversed)
+                PopupMenuItem(
+                  value: item.id,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(item.isOpen
+                        ? Icons.edit_note_rounded
+                        : Icons.lock_outline_rounded),
+                    title: Text(item.isOpen ? s.currentSheet : _period(item)),
+                    subtitle: Text(
+                      '${s.sheetEntries(ledger.entriesOf(item.id).length)}'
+                      ' · ${formatAr(ledger.totalsOf(item.id).closingTotal)}',
+                    ),
+                    trailing: item.id == sheet.id
+                        ? Icon(Icons.check_rounded, color: scheme.primary)
+                        : null,
                   ),
                 ),
-                Expanded(
-                  child: shown.isEmpty
-                      ? EmptyState(
-                          icon: Icons.account_balance_wallet_outlined,
-                          title: strings.noTransactions,
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.only(bottom: 88),
-                          itemCount: shown.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, i) {
-                            final e = shown[i];
-                            final credit =
-                                e.direction == LedgerDirection.credit;
-                            final color =
-                                credit ? Colors.green.shade700 : scheme.error;
-                            return ListTile(
-                              onTap: () => _openEditor(e),
-                              leading: CircleAvatar(
-                                backgroundColor: color.withValues(alpha: 0.12),
-                                child: Icon(
-                                  credit
-                                      ? Icons.south_west_rounded
-                                      : Icons.north_east_rounded,
-                                  color: color,
-                                ),
-                              ),
-                              title: Text(
-                                e.note.isEmpty ? e.type.text(strings) : e.note,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '${formatDate(e.date)} · ${e.type.text(strings)}'
-                                ' · ${e.account.text(strings)}',
-                              ),
-                              trailing: Text(
-                                '${credit ? '+' : '-'}${formatAr(e.amount)}',
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  color: color,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
+            ],
+          )
+        : null;
+
+    Widget? action;
+    if (!isCurrent) {
+      action = TextButton.icon(
+        key: const ValueKey('ledger-back-current'),
+        onPressed: () => onSelect(ledger.current.id),
+        icon: const Icon(Icons.undo_rounded, size: 18),
+        label: Text(s.currentSheet),
+      );
+    } else if (canEdit) {
+      action = Tooltip(
+        message: ledger.canClose ? s.closeSheet : s.closeSheetNeedsEntry,
+        child: FilledButton.tonalIcon(
+          key: const ValueKey('ledger-close-sheet'),
+          onPressed: ledger.canClose ? onClose : null,
+          icon: const Icon(Icons.event_available_rounded, size: 18),
+          label: Text(s.closeSheetShort),
+        ),
+      );
+    }
+
+    final heading = Row(
+      children: [
+        Icon(
+          isCurrent ? Icons.edit_note_rounded : Icons.lock_outline_rounded,
+          color: isCurrent ? scheme.primary : scheme.onTertiaryContainer,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isCurrent ? s.currentSheet : s.sheetReadOnly,
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                '${_period(sheet)} · ${s.sheetEntries(count)}',
+                key: const ValueKey('ledger-sheet-period'),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    return Container(
+      key: const ValueKey('ledger-sheet-bar'),
+      padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+      decoration: BoxDecoration(
+        color: isCurrent
+            ? scheme.surfaceContainerHigh
+            : scheme.tertiaryContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      // Phones: the action button goes under the title instead of squeezing it.
+      child: LayoutBuilder(
+        builder: (context, c) => c.maxWidth < 440 && action != null
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    Expanded(child: heading),
+                    if (history != null) history,
+                  ]),
+                  Align(alignment: Alignment.centerRight, child: action),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: heading),
+                  if (action != null) ...[const SizedBox(width: 8), action],
+                  if (history != null) history,
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _BalanceCard extends StatelessWidget {
+  const _BalanceCard({
+    required this.strings,
+    required this.totals,
+    required this.isCurrent,
+    required this.showOpening,
+  });
+
+  final AppStrings strings;
+  final LedgerSheetTotals totals;
+  final bool isCurrent;
+  final bool showOpening;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final balance = totals.closingTotal;
+    final small =
+        theme.textTheme.bodySmall?.copyWith(color: scheme.onPrimaryContainer);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            isCurrent ? strings.availableBalance : strings.closingBalance,
+            style: theme.textTheme.labelLarge
+                ?.copyWith(color: scheme.onPrimaryContainer),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              formatAr(balance),
+              key: const ValueKey('ledger-balance'),
+              style: theme.textTheme.headlineMedium?.copyWith(
+                color: balance < 0 ? scheme.error : scheme.onPrimaryContainer,
+                fontWeight: FontWeight.w800,
+              ),
             ),
+          ),
+          if (showOpening)
+            Text(
+              '${strings.openingBalance} : ${formatAr(totals.openingTotal)}',
+              key: const ValueKey('ledger-opening'),
+              style: small,
+            ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 2,
+            children: [
+              for (final a in LedgerAccount.values)
+                Text('${a.text(strings)}: ${formatAr(totals.closing[a]!)}',
+                    style: small),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EntryTile extends StatelessWidget {
+  const _EntryTile({
+    required this.entry,
+    required this.strings,
+    required this.onTap,
+  });
+
+  final LedgerEntry entry;
+  final AppStrings strings;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final e = entry;
+    final credit = e.direction == LedgerDirection.credit;
+    final color = credit ? scheme.ledgerCredit : scheme.ledgerDebit;
+    return ListTile(
+      onTap: onTap,
+      leading: CircleAvatar(
+        backgroundColor: color.withValues(alpha: 0.12),
+        child: Icon(
+          credit ? Icons.south_west_rounded : Icons.north_east_rounded,
+          color: color,
+        ),
+      ),
+      title: Text(
+        e.note.isEmpty ? e.type.text(strings) : e.note,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        '${formatDate(e.date)} · ${e.type.text(strings)}'
+        ' · ${e.account.text(strings)}',
+      ),
+      trailing: Text(
+        '${credit ? '+' : '-'}${formatAr(e.amount)}',
+        style: theme.textTheme.titleSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }
@@ -248,11 +521,15 @@ class _EntryDialog extends StatefulWidget {
     required this.entry,
     required this.strings,
     required this.startEditing,
+    this.readOnly = false,
   });
 
   final LedgerEntry? entry;
   final AppStrings strings;
   final bool startEditing;
+
+  /// Entry of a closed sheet: details only, no edit button.
+  final bool readOnly;
 
   @override
   State<_EntryDialog> createState() => _EntryDialogState();
@@ -335,12 +612,13 @@ class _EntryDialogState extends State<_EntryDialog> {
     return AppDialog(
       title: e.type.text(s),
       titleActions: [
-        IconButton(
-          key: const ValueKey('ledger-dialog-edit'),
-          tooltip: s.edit,
-          icon: const Icon(Icons.edit_outlined),
-          onPressed: () => setState(() => _editing = true),
-        ),
+        if (!widget.readOnly)
+          IconButton(
+            key: const ValueKey('ledger-dialog-edit'),
+            tooltip: s.edit,
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () => setState(() => _editing = true),
+          ),
       ],
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -33,6 +33,7 @@ class _ResellerLoginScreenState extends ConsumerState<ResellerLoginScreen> {
         initial: ResellerConfig.aboutUri,
         onSession: _onSession,
         onBackToClipboard: () => context.go('/'),
+        onThemeChange: (b) => setAppThemeFromSite(ref, b),
       );
     }
   }

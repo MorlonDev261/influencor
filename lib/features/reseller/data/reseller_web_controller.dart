@@ -16,13 +16,15 @@ class ResellerWebController {
     required Uri initial,
     required this.onSession,
     this.onBackToClipboard,
+    this.onThemeChange,
   }) {
     web = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel('PomaSession', onMessageReceived: _onMessage)
       ..addJavaScriptChannel('PomaPush', onMessageReceived: _onPushMessage)
       // Its mere presence tells the site it runs inside the app (the reseller
-      // header then shows « clipboard » instead of « Boutique Pôma »).
+      // header then shows its « clipboard » button). Also carries the site's
+      // theme choice back to the app (see [onThemeChange]).
       ..addJavaScriptChannel(ResellerConfig.appChannel,
           onMessageReceived: _onAppMessage)
       ..setNavigationDelegate(NavigationDelegate(
@@ -35,6 +37,7 @@ class ResellerWebController {
           final uri = Uri.tryParse(url);
           if (uri != null && ResellerConfig.isTrusted(uri)) {
             web.runJavaScript(ResellerConfig.sessionProbe(_nonce));
+            _pushTheme();
           }
         },
         onWebResourceError: (e) {
@@ -64,6 +67,28 @@ class ResellerWebController {
   /// clipboard one. Only a mode switch — nothing is read from the page.
   final VoidCallback? onBackToClipboard;
 
+  /// The site's theme button was used: the app adopts that theme too.
+  final ValueChanged<Brightness>? onThemeChange;
+
+  /// Theme currently shown by the app (`light` / `dark`), pushed to every
+  /// page loaded and again whenever it changes (see [setTheme]).
+  String? _theme;
+
+  /// Keeps the site's theme in sync with the app's. Cheap to call on every
+  /// build: the page is only told when the theme actually changes.
+  void setTheme(Brightness brightness) {
+    final theme = brightness == Brightness.dark ? 'dark' : 'light';
+    if (theme == _theme) return;
+    _theme = theme;
+    _pushTheme();
+  }
+
+  void _pushTheme() {
+    final theme = _theme;
+    if (theme == null) return;
+    web.runJavaScript(ResellerConfig.themePush(theme)).catchError((_) {});
+  }
+
   final progress = ValueNotifier<int>(0);
   final error = ValueNotifier<bool>(false);
 
@@ -81,8 +106,17 @@ class ResellerWebController {
   void _onAppMessage(JavaScriptMessage m) {
     try {
       final data = jsonDecode(m.message);
-      if (data is Map && data['action'] == 'clipboard') {
+      if (data is! Map) return;
+      if (data['action'] == 'clipboard') {
         onBackToClipboard?.call();
+      } else if (data['action'] == 'theme') {
+        final theme = data['theme'];
+        if (theme == 'light' || theme == 'dark') {
+          // Remembered right away: the app's rebuild must not push it back.
+          _theme = theme as String;
+          onThemeChange?.call(
+              theme == 'dark' ? Brightness.dark : Brightness.light);
+        }
       }
     } catch (_) {
       // ignore malformed messages

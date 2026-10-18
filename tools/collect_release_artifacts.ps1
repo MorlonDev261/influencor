@@ -81,6 +81,7 @@ foreach ($target in $targets) {
   Copy-IfExists (Join-Path $repo 'build/app/outputs/bundle/release/app-release.aab') $androidDir 'Influencor-release.aab'
 
   Copy-IfExists (Join-Path $repo 'build/installer/InfluencorSetup.exe') $windowsDir 'InfluencorSetup.exe'
+  Copy-IfExists (Join-Path $repo 'build/msix/Influencor.msix') $windowsDir 'Influencor.msix'
   Copy-IfExists (Join-Path $repo 'build/windows/x64/runner/Influencor.exe') $windowsDir 'Influencor-portable.exe'
   Copy-IfExists (Join-Path $repo 'build/windows/x64/runner/Release/influencor.exe') $windowsDir 'influencor.exe'
   # The whole Release folder (exe + DLLs + data): the bare exe cannot run alone.

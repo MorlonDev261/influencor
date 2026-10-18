@@ -35,6 +35,7 @@ class _ResellerHomeState extends ConsumerState<ResellerHome> {
         initial: pending ?? ResellerConfig.homeUri,
         onSession: _onSession,
         onBackToClipboard: _backToClipboard,
+        onThemeChange: (b) => setAppThemeFromSite(ref, b),
       );
       if (pending != null) {
         // The deep link is consumed by the initial load.

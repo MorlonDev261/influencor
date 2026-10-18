@@ -56,6 +56,14 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="poma-notifications" />
+        <!-- Serves the images copied to the clipboard (super_clipboard): without
+             it, copying a note's images fails on Android. The authority must
+             be <package>.SuperClipboardDataProvider. -->
+        <provider
+            android:name="com.superlist.super_native_extensions.DataProvider"
+            android:authorities="${applicationId}.SuperClipboardDataProvider"
+            android:exported="true"
+            android:grantUriPermissions="true" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

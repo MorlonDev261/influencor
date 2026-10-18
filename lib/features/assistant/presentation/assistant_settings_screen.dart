@@ -109,7 +109,9 @@ class _AssistantSettingsScreenState
     } catch (e) {
       if (mounted) {
         setState(() {
-          _status = '$e';
+          _status = e is LlmException && e.kind == LlmFailure.insecureUrl
+              ? ref.read(appStringsProvider).llmInsecureUrl
+              : '$e';
           _statusOk = false;
         });
       }
@@ -178,6 +180,13 @@ class _AssistantSettingsScreenState
               onChanged: (k) => k == null ? null : _selectProvider(k),
             ),
             const SizedBox(height: 16),
+            if (config.keysInPlainText) ...[
+              _PlainTextKeyWarning(
+                title: strings.keysInPlainTextTitle,
+                message: strings.keysInPlainTextMessage,
+              ),
+              const SizedBox(height: 16),
+            ],
             if (kind.needsKey || kind == LlmProviderKind.custom) ...[
               TextField(
                 key: const ValueKey('assistant-api-key'),
@@ -247,11 +256,20 @@ class _AssistantSettingsScreenState
               controller: _url,
               autocorrect: false,
               keyboardType: TextInputType.url,
-              onChanged: (_) => _scheduleSave(),
+              onChanged: (_) {
+                setState(() {}); // refresh the error below
+                _scheduleSave();
+              },
               decoration: InputDecoration(
                 labelText: strings.llmBaseUrl,
                 hintText: kind.baseUrl.isEmpty ? 'https://…/v1' : kind.baseUrl,
                 helperText: strings.llmBaseUrlHint,
+                helperMaxLines: 3,
+                errorText:
+                    _url.text.trim().isNotEmpty && !isSecureEndpoint(_url.text)
+                        ? strings.llmInsecureUrl
+                        : null,
+                errorMaxLines: 4,
                 border: const OutlineInputBorder(),
               ),
             ),
@@ -284,6 +302,57 @@ class _AssistantSettingsScreenState
                   .setConfirmDestructive(v),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the API keys could not go into the system's secure storage.
+class _PlainTextKeyWarning extends StatelessWidget {
+  const _PlainTextKeyWarning({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      container: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.gpp_maybe_outlined, color: scheme.onErrorContainer),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onErrorContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      message,
+                      style: TextStyle(color: scheme.onErrorContainer),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

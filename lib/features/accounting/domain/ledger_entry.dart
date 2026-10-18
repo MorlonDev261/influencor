@@ -38,6 +38,7 @@ class LedgerEntry {
     required this.type,
     required this.direction,
     this.note = '',
+    this.sheetId,
   });
 
   final String id;
@@ -50,8 +51,23 @@ class LedgerEntry {
   final LedgerDirection direction;
   final String note;
 
+  /// The ledger sheet holding this entry; null until the ledger assigns it
+  /// (entries written before sheets existed, or freshly created ones).
+  final String? sheetId;
+
   int get signedAmount =>
       direction == LedgerDirection.credit ? amount : -amount;
+
+  LedgerEntry inSheet(String sheetId) => LedgerEntry(
+        id: id,
+        date: date,
+        amount: amount,
+        account: account,
+        type: type,
+        direction: direction,
+        note: note,
+        sheetId: sheetId,
+      );
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -61,6 +77,7 @@ class LedgerEntry {
         'type': type.name,
         'direction': direction.name,
         'note': note,
+        if (sheetId != null) 'sheet': sheetId,
       };
 
   static LedgerEntry? tryFromJson(Object? raw) {
@@ -79,6 +96,7 @@ class LedgerEntry {
       direction: _enumByName(
           LedgerDirection.values, raw['direction'], LedgerDirection.debit),
       note: raw['note'] is String ? raw['note'] as String : '',
+      sheetId: raw['sheet'] is String ? raw['sheet'] as String : null,
     );
   }
 }

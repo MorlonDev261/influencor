@@ -15,7 +15,7 @@ abstract final class ResellerConfig {
   static final aboutUri = Uri.https(host, '/about');
 
   /// JavaScript channel the site looks for to know it runs inside the app
-  /// (see `BackToShopButton` in the poma-original repo).
+  /// (see `ClipboardButton` and `ResellerHeader` in the poma-original repo).
   static const appChannel = 'InfluencorApp';
   static final homeUri = Uri.https(host, '/');
 
@@ -53,6 +53,21 @@ abstract final class ResellerConfig {
   } catch (e) {}
 })();
 ''';
+
+  /// Tells the page which theme the app shows (`light` / `dark`): stored in
+  /// `window.__influencorTheme` (read by the site when its header mounts) and
+  /// announced through the `influencor:theme` event (already-mounted header).
+  static String themePush(String theme) {
+    assert(theme == 'light' || theme == 'dark');
+    return '''
+(function () {
+  try {
+    window.__influencorTheme = '$theme';
+    window.dispatchEvent(new CustomEvent('influencor:theme', { detail: '$theme' }));
+  } catch (e) {}
+})();
+''';
+  }
 
   /// Registers (`POST`) or removes (`DELETE`) this installation's push token on
   /// `/api/push/native`, from the page itself so the user's session cookie is

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../core/l10n/app_strings.dart';
+import '../../../core/providers/settings_providers.dart';
 import '../data/reseller_config.dart';
 import '../data/reseller_web_controller.dart';
 
@@ -18,6 +21,11 @@ class ResellerWebView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final strings = ref.watch(appStringsProvider);
+    // The site follows the app's theme (the effective one, so « system » is
+    // resolved here); rebuilt whenever that theme changes.
+    final brightness = Theme.of(context).brightness;
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => controller.setTheme(brightness));
     return Stack(
       children: [
         WebViewWidget(controller: controller.web),
@@ -99,3 +107,10 @@ class ResellerBrowserFallback extends ConsumerWidget {
 }
 
 bool get resellerWebViewSupported => ResellerConfig.webViewSupported;
+
+/// The site's theme button changes the app's theme too (an explicit light /
+/// dark choice, like picking it in the settings).
+void setAppThemeFromSite(WidgetRef ref, Brightness brightness) {
+  unawaited(ref.read(settingsControllerProvider.notifier).setThemeMode(
+      brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light));
+}

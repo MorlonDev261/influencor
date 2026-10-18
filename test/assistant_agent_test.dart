@@ -66,7 +66,7 @@ class _FakeConfigStore extends AssistantConfigStore {
       );
 
   @override
-  Future<void> save(AssistantConfig config) async {}
+  Future<AssistantConfig> save(AssistantConfig config) async => config;
 }
 
 /// Plays back scripted turns and records what the agent sent.
@@ -197,6 +197,7 @@ void main() {
       chatStoreProvider
           .overrideWithValue(ChatStore(file: () async => chatFile)),
       llmClientFactoryProvider.overrideWithValue((_) => client),
+      appPrivateDirectoriesProvider.overrideWith((ref) async => [appData.path]),
     ]);
     addTearDown(c.dispose);
     await c.read(assistantConfigControllerProvider.future);
@@ -258,6 +259,29 @@ void main() {
         providers: {LlmProviderKind.openai: ProviderSettings(apiKey: 'sk-x')},
       ));
       expect((await store.load()).current.apiKey, 'sk-x');
+    });
+
+    test('a key stored in clear is flagged, never a missing or secured one',
+        () async {
+      final file = File(p.join(appData.path, 'assistant_settings.json'));
+      const withKey = AssistantConfig(
+        providers: {LlmProviderKind.openai: ProviderSettings(apiKey: 'sk-x')},
+      );
+      final broken = AssistantConfigStore(
+          secrets: _MemorySecrets()..broken = true, file: () async => file);
+      expect((await broken.save(withKey)).keysInPlainText, isTrue);
+      expect(file.readAsStringSync(), contains('sk-x'));
+      expect((await broken.load()).keysInPlainText, isTrue);
+      // No key at all: nothing to warn about.
+      expect((await broken.save(const AssistantConfig())).keysInPlainText,
+          isFalse);
+
+      final secure = AssistantConfigStore(
+          secrets: _MemorySecrets(), file: () async => file);
+      expect((await secure.save(withKey)).keysInPlainText, isFalse);
+      expect((await secure.load()).keysInPlainText, isFalse);
+      // The flag itself is never written to the file.
+      expect(file.readAsStringSync(), isNot(contains('keysInPlainText')));
     });
   });
 
@@ -436,6 +460,52 @@ void main() {
     expect(results.map((r) => r.isError), [true, true]);
   });
 
+  test('the app data folder is off limits, even by absolute path', () async {
+    final settings = File(p.join(appData.path, 'assistant_settings.json'))
+      ..writeAsStringSync('{"providers":{}}');
+    final outside = await Directory.systemTemp.createTemp('influencor_out_');
+    addTearDown(() => outside.delete(recursive: true));
+    final photo = File(p.join(outside.path, 'photo.txt'))
+      ..writeAsStringSync('ok');
+    final client = _ScriptedClient([
+      (_) => _calls([
+            (
+              'import_files',
+              {
+                'sources': [settings.path],
+              }
+            ),
+            (
+              'import_files',
+              {
+                'sources': [appData.path],
+              }
+            ),
+            ('deganeo_inspect', {'path': chatFile.path}),
+            (
+              'import_files',
+              {
+                'sources': [photo.path],
+              }
+            ),
+          ]),
+      (_) => _text('fait'),
+    ]);
+    final c = await container(client);
+    await c.read(assistantChatProvider.notifier).send('importe');
+
+    final results = client.requests[1].last.toolResults;
+    expect(results.map((r) => r.isError), [true, true, true, false]);
+    expect(results.first.content, contains('données internes'));
+    expect(results.last.content, contains('"imported": 1'));
+    // Nothing of the app's data ended up in the workspace.
+    final copied = root
+        .listSync(recursive: true)
+        .map((e) => p.basename(e.path))
+        .where((n) => n.startsWith('assistant_'));
+    expect(copied, isEmpty);
+  });
+
   test('ask_user shows choices and waits for the tapped answer', () async {
     final client = _ScriptedClient([
       (_) => _calls([
@@ -592,6 +662,57 @@ void main() {
       Directory(p.join(root.path, '.clipboard', 'tasks')).listSync(),
       hasLength(1),
     );
+  });
+
+  test('accounting tools work on the current sheet', () async {
+    // A ledger written before sheets existed.
+    File(p.join(root.path, '.clipboard', 'accounting.json'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(jsonEncode({
+        'version': 1,
+        'entries': [
+          {
+            'id': 'old',
+            'date': '2026-10-10',
+            'amount': 20000,
+            'account': 'mvola',
+            'type': 'sale',
+            'direction': 'credit',
+          },
+        ],
+      }));
+    final client = _ScriptedClient([
+      (_) => _calls([
+            ('close_ledger_sheet', <String, dynamic>{}),
+            ('update_transaction', {'id': 'old', 'amount': 1}),
+            (
+              'add_transaction',
+              {'amount': 3000, 'account': 'mvola', 'type': 'expense'}
+            ),
+            ('accounting_summary', <String, dynamic>{}),
+            ('list_ledger_sheets', <String, dynamic>{}),
+          ]),
+      (_) => _text('ok'),
+    ]);
+    final c = await container(client);
+    final chat = c.read(assistantChatProvider.notifier);
+    var asked = 0;
+    chat.confirmHandler = (_, __) async {
+      asked++;
+      return true;
+    };
+    await chat.send('clôture ma feuille');
+
+    expect(asked, 1);
+    final results = client.requests[1].last.toolResults;
+    expect(results.map((r) => r.isError), [false, true, false, false, false]);
+    final summary = jsonDecode(results[3].content) as Map;
+    expect(summary['net'], -3000);
+    expect((summary['opening_balance_by_account'] as Map)['mvola'], 20000);
+    expect((summary['available_balance_by_account'] as Map)['mvola'], 17000);
+    final sheets = (jsonDecode(results[4].content) as Map)['sheets'] as List;
+    expect(sheets.map((s) => (s as Map)['status']), ['open', 'closed']);
+    expect((sheets.last as Map)['closing_balance'], 20000);
   });
 
   test('an unanswered message is dropped so the history stays valid', () async {

@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../library/application/library_providers.dart';
 import '../../../library/domain/library_entry.dart';
 import '../../../library/domain/table_document.dart';
+import '../../../library/domain/table_formula.dart';
 import '../../../search/application/entry_search.dart';
 import '../../../tasks/application/task_providers.dart';
 import '../../../accounting/application/accounting_providers.dart';
@@ -90,21 +91,29 @@ Future<TableDocument> _readTable(AgentToolContext ctx, String path) async {
 }
 
 Map<String, Object?> _tableJson(
-        AgentToolContext ctx, String path, TableDocument t,
-        {int limit = 500}) =>
-    {
-      'path': ctx.rel(path),
-      'columns': [for (final c in t.columns) c.title],
-      'row_count': t.rows.length,
-      'rows': [
-        for (final (i, r) in t.rows.take(limit).indexed)
-          {
-            'row': i + 1,
-            'values': [for (final c in t.columns) r.cells[c.id] ?? ''],
-          },
-      ],
-      if (t.rows.length > limit) 'truncated': true,
-    };
+    AgentToolContext ctx, String path, TableDocument t,
+    {int limit = 500}) {
+  final evaluator = TableEvaluator(t);
+  final formulas = evaluator.hasFormulas;
+  return {
+    'path': ctx.rel(path),
+    'columns': [for (final c in t.columns) c.title],
+    'row_count': t.rows.length,
+    'rows': [
+      for (final (i, r) in t.rows.take(limit).indexed)
+        {
+          'row': i + 1,
+          'values': [for (final c in t.columns) r.cells[c.id] ?? ''],
+          // What the app shows once formulas are computed.
+          if (formulas)
+            'computed': [
+              for (final (j, _) in t.columns.indexed) evaluator.displayAt(i, j),
+            ],
+        },
+    ],
+    if (t.rows.length > limit) 'truncated': true,
+  };
+}
 
 TableColumnDef _column(TableDocument t, String name) {
   final folded = foldForSearch(name.trim());
@@ -124,6 +133,14 @@ TableRowData _row(TableDocument t, List<Object?> values) {
   }
   return TableRowData(id: _uuid.v4(), cells: cells);
 }
+
+const _formulaHelp = 'Formules comme dans Excel : une cellule qui '
+    'commence par "=" est calculée ("=B1*C1", "=SOMME(D1:D9)", "=SI(C1>B1;'
+    '"gain";"perte")") ; un titre de colonne avec "=" calcule toute la '
+    'colonne, une lettre seule voulant dire « même ligne » ("Bénéfice =C-B"). '
+    'Colonnes A, B, C… et lignes numérotées à partir de 1 ; arguments séparés '
+    'par ";". Fonctions : SOMME, MOYENNE, MIN, MAX, NB, NBVAL, PRODUIT, '
+    'ARRONDI, ABS, RACINE, ENT, MOD, SI, ET, OU, NON.';
 
 List<AgentTool> libraryTools() => [
       AgentTool(
@@ -149,7 +166,7 @@ List<AgentTool> libraryTools() => [
             'favorites': all.where((e) => e.isFavorite).length,
             'trash': trash.length,
             'tasks': tasks.length,
-            'accounting_entries': ledger.length,
+            'accounting_entries': ledger.currentEntries.length,
             'top_level': [
               for (final e in await ctx.repo.listEntries(ctx.root))
                 ctx.entryJson(e),
@@ -395,7 +412,8 @@ List<AgentTool> libraryTools() => [
         name: 'read_table',
         label: 'Lecture du tableau',
         description: 'Lit un tableau Influencor (.json) : colonnes et lignes '
-            '(numérotées à partir de 1).',
+            '(numérotées à partir de 1). Avec des formules, "computed" donne '
+            'les valeurs calculées affichées dans l’app.',
         properties: {'path': sStr(pathHint)},
         required: ['path'],
         run: (a, ctx) async {
@@ -408,7 +426,8 @@ List<AgentTool> libraryTools() => [
         name: 'create_table',
         label: 'Création du tableau',
         description: 'Crée un tableau. Une colonne dont le titre est entre '
-            'crochets, ex. "[Mot de passe]", est masquée par défaut dans l’app.',
+            'crochets, ex. "[Mot de passe]", est masquée par défaut dans l’app. '
+            '$_formulaHelp',
         properties: {
           'folder': sStr('Dossier de destination. $pathHint'),
           'name': sStr('Nom du tableau (sans extension).'),
@@ -444,7 +463,8 @@ List<AgentTool> libraryTools() => [
         description: 'Modifie un tableau existant. Actions : add_rows (rows), '
             'update_cells (updates : [{row, column, value}]), delete_rows (row_numbers), '
             'add_column (column), rename_column (column, new_name), delete_column '
-            '(column). Les suppressions gardent l’ancienne version dans la corbeille.',
+            '(column). Les suppressions gardent l’ancienne version dans la corbeille. '
+            '$_formulaHelp',
         properties: {
           'path': sStr(pathHint),
           'action': sStr('Action.', values: [
@@ -541,7 +561,9 @@ List<AgentTool> libraryTools() => [
             default:
               throw ToolError('Action inconnue : $action');
           }
-          final next = TableDocument(columns: columns, rows: rows);
+          // Deleting rows / columns shifts the cells: formulas follow.
+          final next = TableFormula.rewriteReferences(
+              t, TableDocument(columns: columns, rows: rows));
           await ctx.library.saveTable(path, next);
           return {
             'saved': ctx.rel(path),

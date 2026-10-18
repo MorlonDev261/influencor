@@ -46,6 +46,15 @@ try {
     Write-Host 'Inno Setup compiler (iscc) not found; skipping Windows installer.'
   }
 
+  # Microsoft Store package (build/msix/Influencor.msix), from the Release
+  # build above. Needs the Partner Center identity in pubspec's msix_config.
+  if (Select-String -Path pubspec.yaml -Pattern '^\s+identity_name:\s*[^\s#]' -Quiet) {
+    dart run msix:create
+    if ($LASTEXITCODE -ne 0) { throw "MSIX build failed ($LASTEXITCODE)" }
+  } else {
+    Write-Host 'msix_config identity not set in pubspec.yaml; skipping Microsoft Store package.'
+  }
+
   # Android: one APK per ABI, a universal APK, and the Play Store bundle.
   flutter build apk --release --split-per-abi
   if ($LASTEXITCODE -ne 0) { throw "APK (split) build failed" }

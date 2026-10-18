@@ -40,7 +40,10 @@ Future<int> copyNoteToClipboard(String text, List<String> imagePaths) async {
     try {
       if (!await File(path).exists()) continue;
       if (format == null) {
-        files.add((name: p.basename(path), uri: Uri.file(path)));
+        // Android rejects file:// URIs on the clipboard
+        // (FileUriExposedException), which would fail the whole copy, text
+        // included; mobile paste targets cannot use them anyway.
+        if (_desktop) files.add((name: p.basename(path), uri: Uri.file(path)));
       } else {
         images.add((
           name: p.basename(path),
@@ -73,8 +76,12 @@ Future<int> copyNoteToClipboard(String text, List<String> imagePaths) async {
     // note together with its images.
     // Skipped for media-only copies: a base64 blob is huge and some clipboards
     // reject it, which made plain "copy media" fail.
+    // Not on Android: the HTML travels inline in the ClipData, and a photo in
+    // base64 exceeds the ~1 MB Binder limit, so the copy would fail.
     if (text.isNotEmpty) {
-      first.add(Formats.htmlText(_buildHtml(text, images)));
+      if (!Platform.isAndroid) {
+        first.add(Formats.htmlText(_buildHtml(text, images)));
+      }
       first.add(Formats.plainText(text));
     }
     await _addImage(first, firstImage);

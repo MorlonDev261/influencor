@@ -31,6 +31,10 @@ enum LlmFailure {
 
   /// The provider reported an error ([LlmException.message] is its own text).
   service,
+
+  /// The endpoint is plain HTTP to another machine: nothing was sent
+  /// ([LlmException.message] is the address).
+  insecureUrl,
 }
 
 /// A provider error worth showing to the user (bad key, quota, model…).
@@ -170,6 +174,12 @@ abstract class _HttpLlmClient extends LlmClient {
     Map<String, String> headers,
     Map<String, dynamic>? body,
   ) async {
+    // Checked on every request, whatever the settings screen let through:
+    // the key must never leave the device unencrypted.
+    if (!isSecureEndpoint(uri.toString())) {
+      throw LlmException('${uri.scheme}://${uri.authority}',
+          kind: LlmFailure.insecureUrl);
+    }
     try {
       final request = http.Request(method, uri)
         ..headers.addAll({

@@ -2,12 +2,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 
 import '../../../core/services/atomic_file.dart';
+import '../domain/ledger.dart';
 import '../domain/ledger_entry.dart';
 
 /// Reads and writes `<root>/.clipboard/accounting.json` — the ledger lives in
-/// the workspace folder, never in the app's own storage.
+/// the workspace folder, never in the app's own storage. Version 1 files (no
+/// sheets) are read as one open sheet and upgraded on the next write.
 class AccountingStore {
   AccountingStore(this.root);
 
@@ -16,44 +19,35 @@ class AccountingStore {
 
   File get _file => File(p.join(root, '.clipboard', 'accounting.json'));
 
-  Future<List<LedgerEntry>> load() async {
+  Future<Ledger> load() async {
     try {
-      if (!await _file.exists()) return [];
-      final data = jsonDecode(await _file.readAsString(encoding: utf8));
-      final list = data is Map ? data['entries'] : null;
-      if (list is! List) return [];
-      return [
-        for (final raw in list)
-          if (LedgerEntry.tryFromJson(raw) case final e?) e,
-      ];
+      if (!await _file.exists()) return Ledger.empty();
+      return Ledger.fromJson(
+          jsonDecode(await _file.readAsString(encoding: utf8)));
     } catch (_) {
-      return [];
+      return Ledger.empty();
     }
   }
 
-  Future<void> _mutate(void Function(List<LedgerEntry> entries) change) =>
+  Future<Ledger> _mutate(Ledger Function(Ledger ledger) change) =>
       _lock.run(() async {
-        final entries = await load();
-        change(entries);
+        final next = change(await load());
         await writeStringAtomic(
           _file,
-          const JsonEncoder.withIndent('  ').convert({
-            'version': 1,
-            'entries': [for (final e in entries) e.toJson()],
-          }),
+          const JsonEncoder.withIndent('  ').convert(next.toJson()),
         );
+        return next;
       });
 
-  /// Inserts the entry, or replaces the one with the same id.
-  Future<void> upsert(LedgerEntry entry) => _mutate((entries) {
-        final i = entries.indexWhere((e) => e.id == entry.id);
-        if (i >= 0) {
-          entries[i] = entry;
-        } else {
-          entries.add(entry);
-        }
-      });
+  /// Inserts the entry into the open sheet, or replaces the one with the same
+  /// id. Throws [LedgerSheetClosedError] for an entry of a closed sheet.
+  Future<Ledger> upsert(LedgerEntry entry) =>
+      _mutate((ledger) => ledger.upsert(entry));
 
-  Future<void> remove(String id) =>
-      _mutate((entries) => entries.removeWhere((e) => e.id == id));
+  Future<Ledger> remove(String id) => _mutate((ledger) => ledger.remove(id));
+
+  /// Closes the open sheet now and starts a new, empty one (balances carry
+  /// over). Throws a [StateError] when the open sheet has no entries.
+  Future<Ledger> closeCurrentSheet({DateTime? at}) => _mutate((ledger) => ledger
+      .closeCurrent(at: at ?? DateTime.now(), newSheetId: const Uuid().v4()));
 }

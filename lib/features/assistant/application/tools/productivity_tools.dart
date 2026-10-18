@@ -1,6 +1,7 @@
 import 'package:uuid/uuid.dart';
 
 import '../../../accounting/application/accounting_providers.dart';
+import '../../../accounting/domain/ledger.dart';
 import '../../../accounting/domain/ledger_entry.dart';
 import '../../../fees/application/tariff_providers.dart';
 import '../../../fees/domain/mobile_money_fees.dart';
@@ -90,9 +91,43 @@ Map<String, Object?> _ledgerJson(LedgerEntry e) => {
       if (e.note.isNotEmpty) 'note': e.note,
     };
 
-Future<List<LedgerEntry>> _ledger(AgentToolContext ctx) async {
+Future<Ledger> _ledger(AgentToolContext ctx) async {
   ctx.root;
   return ctx.ref.read(ledgerProvider.future);
+}
+
+Map<String, Object?> _sheetJson(Ledger ledger, LedgerSheet s) {
+  final t = ledger.totalsOf(s.id);
+  return {
+    'id': s.id,
+    'status': s.isOpen ? 'open' : 'closed',
+    'start': s.start.toIso8601String(),
+    if (s.end != null) 'end': s.end!.toIso8601String(),
+    'entries': t.count,
+    'total_credit': t.credit,
+    'total_debit': t.debit,
+    'opening_balance': t.openingTotal,
+    'closing_balance': t.closingTotal,
+  };
+}
+
+/// The sheet asked for: the open one by default, `all` for none.
+LedgerSheet? _sheet(Ledger ledger, ToolArgs a) {
+  final id = a.optStr('sheet')?.trim();
+  if (id == null || id.isEmpty || id == 'current') return ledger.current;
+  if (id == 'all') return null;
+  final sheet = ledger.sheetById(id);
+  if (sheet == null) throw ToolError('Feuille introuvable : $id');
+  return sheet;
+}
+
+LedgerEntry _editable(Ledger ledger, String id) {
+  final old = ledger.entries.where((e) => e.id == id).firstOrNull;
+  if (old == null) throw ToolError('Opération introuvable : $id');
+  if (ledger.isClosedEntry(old)) {
+    throw ToolError('Opération $id dans une feuille clôturée (lecture seule).');
+  }
+  return old;
 }
 
 Iterable<LedgerEntry> _filter(List<LedgerEntry> all, ToolArgs a) {
@@ -118,6 +153,8 @@ final _ledgerFilters = {
   'account': sStr('Compte.', values: _accounts),
   'type': sStr('Type.', values: _types),
   'query': sStr('Texte recherché dans la note.'),
+  'sheet': sStr('Feuille comptable : "current" (défaut, la feuille en cours), '
+      '"all" (toutes) ou un id de list_ledger_sheets.'),
 };
 
 // --- Fees --------------------------------------------------------------------
@@ -265,15 +302,22 @@ List<AgentTool> productivityTools() => [
         name: 'list_transactions',
         label: 'Comptabilité',
         description: 'Liste les opérations comptables (montants en Ariary), '
-            'les plus récentes d’abord, avec filtres.',
+            'les plus récentes d’abord, avec filtres. Par défaut : la feuille '
+            'en cours seulement.',
         properties: {
           ..._ledgerFilters,
           'limit': sInt('Maximum renvoyé (défaut 100).'),
         },
         run: (a, ctx) async {
-          final list = _filter(await _ledger(ctx), a).toList();
+          final ledger = await _ledger(ctx);
+          final sheet = _sheet(ledger, a);
+          final list = _filter(
+                  sheet == null ? ledger.entries : ledger.entriesOf(sheet.id),
+                  a)
+              .toList();
           final limit = (a.optInt('limit') ?? 100).clamp(1, 1000);
           return {
+            if (sheet != null) 'sheet': _sheetJson(ledger, sheet),
             'total': list.length,
             'entries': [for (final e in list.take(limit)) _ledgerJson(e)],
           };
@@ -282,12 +326,31 @@ List<AgentTool> productivityTools() => [
       AgentTool(
         name: 'accounting_summary',
         label: 'Bilan comptable',
-        description: 'Bilan (Ariary) sur une période : solde par compte, total '
-            'des ventes, achats et dépenses, résultat net.',
+        description: 'Bilan (Ariary) de la feuille en cours par défaut : '
+            'mouvements par compte, total des ventes, achats et dépenses, '
+            'résultat net, et pour une feuille son solde reporté et son solde '
+            'disponible par compte.',
         properties: _ledgerFilters,
         run: (a, ctx) async {
-          final list = _filter(await _ledger(ctx), a).toList();
+          final ledger = await _ledger(ctx);
+          final sheet = _sheet(ledger, a);
+          final list = _filter(
+                  sheet == null ? ledger.entries : ledger.entriesOf(sheet.id),
+                  a)
+              .toList();
+          final totals = sheet == null ? null : ledger.totalsOf(sheet.id);
           return {
+            if (sheet != null) 'sheet': _sheetJson(ledger, sheet),
+            if (totals != null) ...{
+              'opening_balance_by_account': {
+                for (final acc in LedgerAccount.values)
+                  acc.name: totals.opening[acc],
+              },
+              'available_balance_by_account': {
+                for (final acc in LedgerAccount.values)
+                  acc.name: totals.closing[acc],
+              },
+            },
             'entries': list.length,
             'balance_by_account': {
               for (final acc in LedgerAccount.values)
@@ -308,8 +371,9 @@ List<AgentTool> productivityTools() => [
       AgentTool(
         name: 'add_transaction',
         label: 'Nouvelle opération',
-        description: 'Ajoute une opération comptable. Le sens par défaut : '
-            'vente = entrée (credit), achat/dépense = sortie (debit).',
+        description: 'Ajoute une opération comptable à la feuille en cours. '
+            'Le sens par défaut : vente = entrée (credit), achat/dépense = '
+            'sortie (debit).',
         properties: {
           'amount': sInt('Montant positif en Ariary.'),
           'account': sStr('Compte.', values: _accounts),
@@ -341,7 +405,8 @@ List<AgentTool> productivityTools() => [
       AgentTool(
         name: 'update_transaction',
         label: 'Modification de l’opération',
-        description: 'Modifie une opération comptable existante (par id).',
+        description: 'Modifie une opération comptable existante (par id). '
+            'Les opérations des feuilles clôturées sont en lecture seule.',
         properties: {
           'id': sStr('Id de l’opération.'),
           'amount': sInt('Montant positif en Ariary.'),
@@ -353,11 +418,7 @@ List<AgentTool> productivityTools() => [
         },
         required: ['id'],
         run: (a, ctx) async {
-          final all = await _ledger(ctx);
-          final old = all.where((e) => e.id == a.str('id')).firstOrNull;
-          if (old == null) {
-            throw ToolError('Opération introuvable : ${a.str('id')}');
-          }
+          final old = _editable(await _ledger(ctx), a.str('id'));
           final entry = LedgerEntry(
             id: old.id,
             date: _date(a.optStr('date')) ?? old.date,
@@ -382,13 +443,48 @@ List<AgentTool> productivityTools() => [
         confirm: (a, ctx) =>
             "Supprimer définitivement l'opération comptable ${a.str('id')} ?",
         run: (a, ctx) async {
-          final all = await _ledger(ctx);
-          final old = all.where((e) => e.id == a.str('id')).firstOrNull;
-          if (old == null) {
-            throw ToolError('Opération introuvable : ${a.str('id')}');
-          }
+          final old = _editable(await _ledger(ctx), a.str('id'));
           await ctx.ref.read(ledgerProvider.notifier).remove(old.id);
           return {'deleted': _ledgerJson(old)};
+        },
+      ),
+      AgentTool(
+        name: 'list_ledger_sheets',
+        label: 'Feuilles comptables',
+        description: 'Liste les feuilles comptables, la plus récente d’abord : '
+            'la feuille en cours (open) et les feuilles clôturées (closed, '
+            'lecture seule) avec dates de début / fin, totaux crédit / débit, '
+            'solde reporté et solde de clôture (Ariary).',
+        run: (a, ctx) async {
+          final ledger = await _ledger(ctx);
+          return {
+            'sheets': [
+              for (final s in ledger.sheets.reversed) _sheetJson(ledger, s),
+            ],
+          };
+        },
+      ),
+      AgentTool(
+        name: 'close_ledger_sheet',
+        label: 'Clôture de la feuille',
+        description: 'Clôture la feuille comptable en cours maintenant (elle '
+            'passe en lecture seule) et démarre une nouvelle feuille vide, avec '
+            'le solde reporté. Seulement si l’utilisateur le demande.',
+        confirm: (a, ctx) => 'Clôturer la feuille comptable en cours '
+            'maintenant et en commencer une nouvelle ?',
+        run: (a, ctx) async {
+          final ledger = await _ledger(ctx);
+          if (!ledger.canClose) {
+            throw const ToolError(
+                'La feuille en cours est vide : rien à clôturer.');
+          }
+          final closed =
+              await ctx.ref.read(ledgerProvider.notifier).closeCurrentSheet();
+          final next = await _ledger(ctx);
+          return {
+            if (closed != null) 'closed': _sheetJson(next, closed),
+            'current': _sheetJson(next, next.current),
+          };
         },
       ),
 

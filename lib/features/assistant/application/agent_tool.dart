@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
@@ -36,9 +38,14 @@ class AgentToolContext {
     required this.confirm,
     this.navigator,
     this.ask,
+    this.protectedDirs = const [],
   });
 
   final Ref ref;
+
+  /// The app's own data (settings, API keys, conversation): no tool may
+  /// read, import or touch anything in there, whatever the model asks.
+  final List<String> protectedDirs;
   final ConfirmAction confirm;
   final NavigateAction? navigator;
   final AskUser? ask;
@@ -83,7 +90,10 @@ class AgentToolContext {
       abs = p.normalize(
           p.join(root, raw.startsWith('/') ? raw.substring(1) : raw));
     }
-    if (anywhere) return abs;
+    if (anywhere) {
+      _guardPrivate(abs, input);
+      return abs;
+    }
     final r = root;
     // "/Clients/Ana" usually means "Clients/Ana" in the workspace.
     if (!p.equals(abs, r) && !p.isWithin(r, abs) && raw.startsWith('/')) {
@@ -96,7 +106,42 @@ class AgentToolContext {
     if (parts.any((s) => s == '..' || s == '.clipboard')) {
       throw ToolError('Chemin non autorisé : $input');
     }
+    _guardPrivate(abs, input);
     return abs;
+  }
+
+  /// Refuses [abs] when it is in one of [protectedDirs] (also through a
+  /// symbolic link). The user's workspace stays reachable even if it was
+  /// chosen inside such a folder.
+  void _guardPrivate(String abs, String? input) {
+    if (protectedDirs.isEmpty) return;
+    final candidates = {abs, _realPath(abs)};
+    final workspace = rootOrNull;
+    bool inside(String dir, String path) =>
+        p.equals(dir, path) || p.isWithin(dir, path);
+    for (final path in candidates) {
+      if (workspace != null &&
+          (inside(workspace, path) || inside(_realPath(workspace), path))) {
+        continue;
+      }
+      for (final dir in protectedDirs) {
+        if (inside(dir, path) || inside(_realPath(dir), path)) {
+          throw ToolError(
+              "Accès refusé : ce chemin est dans les données internes de l'app "
+              '(réglages, clés, conversation) : $input');
+        }
+      }
+    }
+  }
+
+  static String _realPath(String path) {
+    try {
+      return FileSystemEntity.typeSync(path) == FileSystemEntityType.notFound
+          ? path
+          : File(path).resolveSymbolicLinksSync();
+    } catch (_) {
+      return path;
+    }
   }
 
   /// Path shown to the model and the user: relative to the workspace when

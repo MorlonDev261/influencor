@@ -34,7 +34,12 @@ class AssistantConfigController extends AsyncNotifier<AssistantConfig> {
 
   Future<void> save(AssistantConfig config) async {
     state = AsyncData(config);
-    await ref.read(assistantConfigStoreProvider).save(config);
+    final stored = await ref.read(assistantConfigStoreProvider).save(config);
+    // Unless a newer save went in meanwhile, keep the storage outcome (the
+    // plain-text warning).
+    if (ref.mounted && identical(state.value, config)) {
+      state = AsyncData(stored);
+    }
   }
 
   AssistantConfig get _current => state.value ?? const AssistantConfig();
@@ -57,6 +62,21 @@ final assistantConfigControllerProvider =
 final assistantConfigProvider = Provider<AssistantConfig>((ref) =>
     ref.watch(assistantConfigControllerProvider).value ??
     const AssistantConfig());
+
+/// Folders holding the app's own data — settings, API keys (the Windows
+/// encrypted file, Android's encrypted preferences), the conversation. The
+/// assistant's tools can never reach them. Overridden in tests.
+final appPrivateDirectoriesProvider = FutureProvider<List<String>>((ref) async {
+  try {
+    final support = (await getApplicationSupportDirectory()).path;
+    return [
+      support,
+      if (Platform.isAndroid) p.join(p.dirname(support), 'shared_prefs'),
+    ];
+  } catch (_) {
+    return const [];
+  }
+});
 
 /// Where the conversation is saved between launches. Overridden in tests.
 final chatStoreProvider = Provider<ChatStore>((ref) => ChatStore());
@@ -473,8 +493,10 @@ class AssistantChatController extends Notifier<AssistantChatState> {
     final tools = ref.read(agentToolsProvider);
     final byName = {for (final t in tools) t.name: t};
     final schemas = [for (final t in tools) t.schema];
+    final protectedDirs = await ref.read(appPrivateDirectoriesProvider.future);
     final ctx = AgentToolContext(
       ref: ref,
+      protectedDirs: protectedDirs,
       confirm: (title, msg) async =>
           await confirmHandler?.call(title, msg) ?? false,
       navigator: (route, {required push}) => navigator?.call(route, push: push),
@@ -676,6 +698,7 @@ class AssistantChatController extends Notifier<AssistantChatState> {
       LlmFailure.stalled => strings.llmStalled,
       LlmFailure.emptyReply => strings.llmEmptyReply,
       LlmFailure.unexpectedReply => strings.llmUnexpectedReply,
+      LlmFailure.insecureUrl => strings.llmInsecureUrl,
       // The provider's own words (often English): shown as they are.
       LlmFailure.service =>
         e.message.trim().isEmpty ? strings.llmServiceError : e.message,

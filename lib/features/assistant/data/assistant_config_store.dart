@@ -57,6 +57,7 @@ class AssistantConfig {
     this.providers = const {},
     this.confirmDestructive = true,
     this.maxSteps = 24,
+    this.keysInPlainText = false,
   });
 
   final LlmProviderKind provider;
@@ -67,6 +68,13 @@ class AssistantConfig {
 
   /// Tool rounds allowed for one user message (guards against loops).
   final int maxSteps;
+
+  /// The system's secure storage failed, so the API keys sit in clear in
+  /// the app's settings file. Runtime state only, never saved; the settings
+  /// screen warns about it.
+  final bool keysInPlainText;
+
+  bool get hasAnyKey => providers.values.any((s) => s.apiKey.trim().isNotEmpty);
 
   ProviderSettings settingsFor(LlmProviderKind kind) =>
       providers[kind] ?? const ProviderSettings();
@@ -94,12 +102,14 @@ class AssistantConfig {
     Map<LlmProviderKind, ProviderSettings>? providers,
     bool? confirmDestructive,
     int? maxSteps,
+    bool? keysInPlainText,
   }) =>
       AssistantConfig(
         provider: provider ?? this.provider,
         providers: providers ?? this.providers,
         confirmDestructive: confirmDestructive ?? this.confirmDestructive,
         maxSteps: maxSteps ?? this.maxSteps,
+        keysInPlainText: keysInPlainText ?? this.keysInPlainText,
       );
 
   AssistantConfig withProviderSettings(
@@ -218,9 +228,9 @@ class AssistantConfigStore {
         }
       }
     } catch (e) {
-      // No secure storage here: keep whatever the file holds.
+      // No secure storage here: keep whatever the file holds, and say so.
       debugPrint('Assistant: secure storage unavailable ($e)');
-      return config;
+      return config.copyWith(keysInPlainText: config.hasAnyKey);
     }
     final result = config.copyWith(providers: providers);
     // Rewrite the file without the keys that were just moved.
@@ -228,7 +238,9 @@ class AssistantConfigStore {
     return result;
   }
 
-  Future<void> save(AssistantConfig config) async {
+  /// Saves [config]; returns it as stored, with [AssistantConfig.keysInPlainText]
+  /// set when the keys had to go in clear into the settings file.
+  Future<AssistantConfig> save(AssistantConfig config) async {
     var secured = true;
     try {
       for (final kind in LlmProviderKind.values) {
@@ -244,6 +256,7 @@ class AssistantConfigStore {
       secured = false;
     }
     await _writeFile(config, withKeys: !secured);
+    return config.copyWith(keysInPlainText: !secured && config.hasAnyKey);
   }
 
   Future<void> _writeFile(AssistantConfig config,
