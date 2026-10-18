@@ -1,7 +1,7 @@
 name: influencor
 description: "Influencor — a personal content library for social media managers and creators."
 publish_to: "none"
-version: 1.0.0+4004
+version: 1.0.0+4005
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
