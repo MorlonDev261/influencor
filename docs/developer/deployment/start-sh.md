@@ -6,9 +6,9 @@
 
 > **Retirée de `influencor.mi-kandra.org`.** Ce domaine sert désormais le site vitrine et
 > les téléchargements (dépôt [`influencor-web`](https://github.com/MorlonDev261/influencor-web)).
-> L'app web Flutter n'est plus déployée par défaut : `start.sh` refuse de démarrer tant que
-> `INFLUENCOR_DOMAIN` est vide ou vaut `influencor.mi-kandra.org`. Sur un serveur où elle
-> tourne encore : `./start.sh --stop`, puis lancer `influencor-web`.
+> L'app web Flutter n'est servie que sur les domaines ajoutés avec `./start.sh --domain-add` :
+> `start.sh` refuse de démarrer sans domaine, et refuse `influencor.mi-kandra.org`. Sur un serveur
+> où elle tourne encore sur ce domaine : `./start.sh --stop`, puis lancer `influencor-web`.
 
 Le contexte (domaine, ports, fichiers) est décrit dans [Web : app Flutter](./web-mi-kandra.md).
 
@@ -19,32 +19,32 @@ flowchart TD
     A([./start.sh]) --> B{.env présent ?}
     B -- non --> B2[copie .env.example vers .env, permissions 600]
     B -- oui --> C
-    B2 --> C[lit INFLUENCOR_DOMAIN, vide par défaut]
+    B2 --> C[nginx/sites/domains.list, amorcée une fois par INFLUENCOR_DOMAIN]
     C --> D{docker installé ?}
     D -- non --> X1([erreur : docker est requis])
     D -- oui --> DG{option --stop / --status ?}
     DG -- oui --> E{option}
-    DG -- non --> DD{INFLUENCOR_DOMAIN vide ou influencor.mi-kandra.org ?}
-    DD -- oui --> X0([erreur : domaine du site vitrine, app web non déployée])
-    DD -- non --> E
+    DG -- non --> E
     E -->|"--stop"| E1[docker compose down] --> Z0([fin])
     E -->|"--status"| E2[état Mi Kandra puis sonde publique] --> Z0
     E -->|"--build"| E3{flutter installé ?}
     E3 -- non --> X2([erreur : flutter est requis])
     E3 -- oui --> E4[flutter build web --release --no-wasm-dry-run] --> F
-    E -->|"aucune"| F{build/web/index.html présent ?}
+    E -->|"aucune"| DD{aucun domaine, ou influencor.mi-kandra.org ?}
+    DD -- oui --> X0([erreur : ./start.sh --domain-add domaine])
+    DD -- non --> F{build/web/index.html présent ?}
     F -- non --> X3([erreur : lancez --build ou copiez le build web])
-    F -- oui --> G{certificat nginx/certs présent ?}
-    G -- non --> X4([erreur : placez fullchain.pem et privkey.pem])
-    G -- oui --> H[cohabitation : choix mémorisé, puis ports selon le mode détecté]
-    H --> I[docker compose up -d --remove-orphans]
+    F -- oui --> H[cohabitation : choix mémorisé, puis ports selon le mode détecté]
+    H --> G[génère nginx/sites/domaine.conf pour chaque domaine]
+    G --> I[docker compose up -d --remove-orphans]
     I --> J{mode du routeur}
     J -- partagé --> J1[edge sync : enregistre la route dans le routeur partagé]
     J -- en attente --> J2[adopt --yes si MI_KANDRA_EDGE_AUTOADOPT=1]
     J -- autonome --> K
     J1 --> K
-    J2 --> K[sonde du lien public]
-    K --> Z1([https://INFLUENCOR_DOMAIN])
+    J2 --> L[domaines sans certificat : Let's Encrypt puis nginx -s reload]
+    L --> K[sonde du lien public de chaque domaine]
+    K --> Z1([https://domaine])
 ```
 
 Modes de cohabitation, détectés par `scripts/edge/mi-kandra-edge.sh` :
@@ -63,9 +63,44 @@ Modes de cohabitation, détectés par `scripts/edge/mi-kandra-edge.sh` :
 | `./start.sh` | Démarre nginx, qui sert `build/web`, et cohabite avec les autres stacks. Exige un `build/web` existant. |
 | `./start.sh --build` | Construit d'abord le site (`flutter build web --release --no-wasm-dry-run`), puis démarre. |
 | `./start.sh --stop` | Arrête le conteneur (`docker compose down`). |
-| `./start.sh --status` | État Mi Kandra (mode, routes) puis sonde du lien public. |
+| `./start.sh --status` | État Mi Kandra (mode, routes) puis sonde du lien public de chaque domaine. |
+| `./start.sh --domains` | Liste les domaines, l'origine de leur certificat (manuel, letsencrypt, ancien, aucun) et l'expiration réellement servie. |
+| `./start.sh --domain-add <domaine> [--force]` | Ajoute un domaine **à chaud** (voir ci-dessous). `--force` ignore le contrôle DNS. |
+| `./start.sh --domain-remove <domaine> [--purge]` | Retire un domaine à chaud. `--purge` supprime aussi son certificat Let's Encrypt. |
+| `./start.sh --renew` | Renouvelle les certificats Let's Encrypt proches de l'expiration, puis recharge nginx. À planifier (cron quotidien). |
 
 Toute autre option est refusée (`option inconnue`). Il n'y a pas d'option `--help` : l'en-tête du script fait office d'aide.
+
+## Domaines et certificats (à chaud)
+
+Les domaines vivent dans `nginx/sites/domains.list` (un par ligne, non versionné) ; chaque domaine a son vhost
+généré `nginx/sites/<domaine>.conf`. Ajouter ou retirer un domaine **ne redémarre jamais le conteneur** :
+nginx est rechargé (`nginx -s reload`, sans coupure) et le routeur partagé relit la liste dans le conteneur
+(label `org.mi-kandra.domains-file`).
+
+`--domain-add` enchaîne : contrôle DNS (`mi-kandra-dns.sh check`) → vhost HTTP + rechargement → route dans le
+routeur partagé → test HTTP-01 local puis public → certificat Let's Encrypt (certbot en conteneur, webroot
+`nginx/acme/`) → vhost HTTPS + rechargement → vérification HTTPS avec chaîne de certificats validée.
+Au moindre échec, retour arrière complet : le domaine n'est pas ajouté.
+
+Certificat d'un domaine, par priorité :
+
+1. `nginx/certs/<domaine>/fullchain.pem` + `privkey.pem` (manuel, ex. Cloudflare Origin Certificate) ;
+2. Let's Encrypt (`nginx/letsencrypt/live/<domaine>/`, émis par `start.sh`) ;
+3. l'ancien certificat unique `nginx/certs/fullchain.pem`, s'il couvre le domaine.
+
+Variables `.env` : `LETSENCRYPT_EMAIL` (alertes d'expiration), `LETSENCRYPT_STAGING=1` (autorité de test).
+
+Renouvellement, par exemple dans la crontab root :
+
+```bash
+17 3 * * * /chemin/influencor/start.sh --renew >/dev/null
+```
+
+> Mise à niveau : le premier `./start.sh` après cette version recrée une fois le conteneur (nouveaux
+> volumes et label) ; ensuite, plus aucun redémarrage pour les domaines. Domaine derrière Cloudflare
+> (nuage orange) : désactivez « Always Use HTTPS » le temps d'émettre le certificat, ou utilisez un
+> certificat d'origine Cloudflare dans `nginx/certs/<domaine>/`.
 
 ## Sous-commandes du routeur (`scripts/edge/mi-kandra-edge.sh`)
 
@@ -91,7 +126,11 @@ La sonde du lien public utilise `scripts/edge/mi-kandra-dns.sh probe <domaine>`.
 |---|---|
 | `start.sh` | Orchestrateur décrit ci-dessus. |
 | `docker-compose.yml` | nginx durci, labels `org.mi-kandra.*`. |
-| `nginx/templates/influencor.conf.template` | Vhost (HTTP vers HTTPS, cache, repli SPA). |
-| `nginx/certs/` | `fullchain.pem` et `privkey.pem` (jamais versionnés). |
+| `nginx/templates/influencor.conf.template` | Serveurs par défaut, puis `include` des vhosts de `nginx/sites/`. |
+| `nginx/snippets/influencor-app.conf` | Corps commun des vhosts HTTPS (en-têtes, cache, repli SPA). |
+| `nginx/snippets/acme-challenge.conf` | Sert les jetons HTTP-01 de Let's Encrypt. |
+| `nginx/sites/` | Générés : `domains.list` et un vhost par domaine (jamais versionnés). |
+| `nginx/certs/` | Certificats manuels, `nginx/certs/<domaine>/` (jamais versionnés). |
+| `nginx/letsencrypt/`, `nginx/acme/` | Certificats Let's Encrypt et webroot HTTP-01 (jamais versionnés). |
 | `scripts/edge/` | Routeur partagé, sonde DNS, sauvegardes ; seul `project.env` diffère entre projets. |
-| `.env.example` | `INFLUENCOR_DOMAIN` (vide par défaut), chemins des certificats. |
+| `.env.example` | `LETSENCRYPT_EMAIL`, `LETSENCRYPT_STAGING`, ancien `INFLUENCOR_DOMAIN` et chemins de l'ancien certificat. |

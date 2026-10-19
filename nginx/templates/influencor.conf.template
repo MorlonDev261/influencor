@@ -4,12 +4,20 @@
 # Syntaxe envsubst : ${VAR} est remplacé au démarrage, seulement pour les noms
 # filtrés par NGINX_ENVSUBST_FILTER (INFLUENCOR_*, SSL_*). Les variables Nginx
 # ($host, $uri…) s'écrivent donc normalement, avec un seul $.
+#
+# Les domaines servis ne sont PAS ici : un fichier par domaine dans
+# /etc/nginx/sites/ (nginx/sites/ sur l'hôte), généré par
+#   ./start.sh --domain-add <domaine>  /  --domain-remove <domaine>
+# puis pris en compte par un simple `nginx -s reload` (aucun redémarrage).
 # =============================================================================
 
 # IP client réelle : derrière le routeur partagé (:8443, PROXY protocol) et/ou
 # derrière le proxy Cloudflare (nuage orange).
 include /etc/nginx/snippets/mi-kandra-realip.conf;
 include /etc/nginx/snippets/mi-kandra-cloudflare.conf;
+
+# Plusieurs domaines, parfois longs : la valeur par défaut (32/64) fait échouer nginx -t.
+server_names_hash_bucket_size 128;
 
 # Host inconnu / scan direct de l'IP : on coupe, sans rien révéler.
 server {
@@ -34,54 +42,5 @@ server {
     ssl_reject_handshake on;
 }
 
-# HTTP → HTTPS (Cloudflare en « Full (strict) » ne reboucle pas ici).
-server {
-    listen 80;
-    include /etc/nginx/snippets/mi-kandra-listen-http.conf;
-    server_name ${INFLUENCOR_DOMAIN};
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    include /etc/nginx/snippets/mi-kandra-listen-tls.conf;
-    http2 on;
-    server_name ${INFLUENCOR_DOMAIN};
-
-    ssl_certificate     ${SSL_CERT_PATH};
-    ssl_certificate_key ${SSL_KEY_PATH};
-    include /etc/nginx/snippets/ssl-params.conf;
-
-    server_tokens off;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    root /usr/share/nginx/html;
-    index index.html;
-
-    gzip on;
-    gzip_types text/css application/javascript application/json image/svg+xml application/wasm;
-    gzip_min_length 1024;
-
-    # Fichiers non versionnés par hash : toujours revalidés, sinon une nouvelle
-    # version du build resterait coincée dans le cache / le service worker.
-    location ~* ^/(index\.html|flutter_bootstrap\.js|flutter_service_worker\.js|version\.json|manifest\.json)$ {
-        add_header Cache-Control "no-cache" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        try_files $uri =404;
-    }
-
-    location ~* \.(?:js|wasm|css|png|jpg|jpeg|svg|ico|ttf|otf|woff2?|json|bin)$ {
-        add_header Cache-Control "public, max-age=86400" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        try_files $uri =404;
-    }
-
-    # Routes de l'app (go_router) : retombent sur index.html.
-    location / {
-        add_header Cache-Control "no-cache" always;
-        try_files $uri $uri/ /index.html;
-    }
-}
+# Un fichier par domaine (vide au premier démarrage : seuls les serveurs par défaut répondent).
+include /etc/nginx/sites/*.conf;

@@ -11,6 +11,19 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+# Fichiers temporaires, sauvegardes et déchets système
+*.bak
+*.orig
+*.tmp
+*~
+Thumbs.db
+desktop.ini
+# Crash logs JVM (Gradle / Android)
+hs_err_pid*
+replay_pid*
+# Tests : couverture et sorties éphémères
+/coverage/
+/test/**/failures/
 
 # IntelliJ / Android Studio
 *.iml
@@ -72,12 +85,17 @@ app.*.map.json
 # Local secrets
 *.env
 .env*
+# Réglages du projet (nom, ports de diagnostic), sans secret : lu par start.sh, doit être versionné.
+!/scripts/edge/project.env
 
 # Local release artifacts collected by tools/collect_release_artifacts.ps1
 /dist/latest/**
 /dist/releases/**
 !/dist/README.md
 !/dist/.gitkeep
+
+# Vidéos de présentation : trop lourdes pour git, gardées en local
+/docs/video/
 
 # Local scratch (screenshots, logs, backups) and compiler output
 /tmp/
@@ -87,5 +105,9 @@ app.*.map.json
 **/android/app/google-services.json
 
 !.env.example
-/nginx/certs/*.pem
-/nginx/certs/*.key
+/nginx/certs/*
+!/nginx/certs/.gitkeep
+# Générés par start.sh (domaines, Let's Encrypt)
+/nginx/sites/
+/nginx/letsencrypt/
+/nginx/acme/

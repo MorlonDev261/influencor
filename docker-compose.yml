@@ -43,22 +43,27 @@ services:
       org.mi-kandra.role: origin
       org.mi-kandra.project: influencor
       org.mi-kandra.origin-alias: influencor-origin
-      org.mi-kandra.domains: "${INFLUENCOR_DOMAIN:-}"
+      # Domaines lus À CHAUD dans ce fichier (./start.sh --domain-add / --domain-remove) :
+      # pas de label org.mi-kandra.domains figé, qui obligerait à recréer le conteneur.
+      org.mi-kandra.domains-file: /etc/nginx/sites/domains.list
       org.mi-kandra.edge-capable: "1"
       org.mi-kandra.diag-http: "18084"
       org.mi-kandra.diag-https: "18447"
 
     environment:
-      INFLUENCOR_DOMAIN: ${INFLUENCOR_DOMAIN:-}
       NGINX_ENVSUBST_FILTER: 'INFLUENCOR_|SSL_'
-      SSL_CERT_PATH: ${SSL_CERT_PATH:-/etc/nginx/certs/fullchain.pem}
-      SSL_KEY_PATH: ${SSL_KEY_PATH:-/etc/nginx/certs/privkey.pem}
 
     volumes:
       - ./build/web:/usr/share/nginx/html:ro
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
+      # Générés par start.sh : un vhost par domaine + domains.list.
+      - ./nginx/sites:/etc/nginx/sites:ro
+      # Certificats manuels : nginx/certs/<domaine>/{fullchain,privkey}.pem
       - ./nginx/certs:/etc/nginx/certs:ro
+      # Let's Encrypt (certbot lancé par start.sh) : certificats + webroot HTTP-01.
+      - ./nginx/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/acme:/var/www/acme:ro
 
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]

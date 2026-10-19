@@ -125,6 +125,19 @@ ensure_network() {
 
 label() { docker inspect -f "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null; }
 
+# Domaines d'un origin. Label org.mi-kandra.domains-file = fichier DANS le conteneur
+# (un domaine par ligne, # = commentaire) : la liste change à chaud, sans recréer le
+# conteneur. Fichier présent mais vide = plus aucun domaine. Sans ce label, ou fichier
+# illisible : label org.mi-kandra.domains, comme avant.
+origin_domains() {
+  od_file=$(label "$1" org.mi-kandra.domains-file)
+  if [ -n "$od_file" ] && od_txt=$(docker exec "$1" cat "$od_file" 2>/dev/null); then
+    printf '%s\n' "$od_txt" | sed 's/#.*//' | tr -s ' \t\r\n' '    ' | sed 's/^ //;s/ $//'
+    return 0
+  fi
+  label "$1" org.mi-kandra.domains
+}
+
 # nginx >= 1.27.3 : le paramètre `resolve` des upstreams (résolution DNS dynamique)
 # n'existe pas avant. Un serveur qui garde en cache une vieille image « 1.27 »
 # refuserait de démarrer nginx : on le détecte AVANT. Codes : 0 ok, 1 trop
@@ -339,11 +352,17 @@ register_origin() {
   r_ctr=$1
   r_project=$(label "$r_ctr" org.mi-kandra.project)
   r_alias=$(label "$r_ctr" org.mi-kandra.origin-alias)
-  r_domains=$(label "$r_ctr" org.mi-kandra.domains)
+  r_domains=$(origin_domains "$r_ctr")
   # Filet de sécurité si la stack n'a pas (encore) rejoint le réseau partagé.
   if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$r_ctr" 2>/dev/null | grep -q "\"$EDGE_NET\""; then
     is_alias "$r_alias" && docker network connect --alias "$r_alias" "$EDGE_NET" "$r_ctr" >/dev/null 2>&1 \
       && ok "$r_project : $r_ctr rattaché au réseau $EDGE_NET"
+  fi
+  # Liste vivante vidée (dernier domaine retiré) : on retire les routes au lieu d'échouer.
+  if [ -z "$r_domains" ] && [ -n "$(label "$r_ctr" org.mi-kandra.domains-file)" ]; then
+    is_project "$r_project" || { fail "nom de projet invalide : '$r_project'"; return 1; }
+    edge_exec "[ -f $EDGE_ROUTES/$r_project.tls.map ]" || { ok "$r_project : aucun domaine, aucune route"; return 0; }
+    cmd_unregister "$r_project"; return $?
   fi
   write_routes "$r_project" "$r_alias" "$r_domains"
 }
@@ -540,7 +559,7 @@ cmd_status() {
   fi
   say "origins détectés :"
   for c in $(list_origins); do
-    say "  - $c  projet=$(label "$c" org.mi-kandra.project) alias=$(label "$c" org.mi-kandra.origin-alias) domaines='$(label "$c" org.mi-kandra.domains)'"
+    say "  - $c  projet=$(label "$c" org.mi-kandra.project) alias=$(label "$c" org.mi-kandra.origin-alias) domaines='$(origin_domains "$c")'"
   done
   [ -n "$(list_origins)" ] || say "  (aucun)"
   say "conteneurs publiant 80/443 : $(port_holders | cut -d'|' -f1 | tr '\n' ' ')"
@@ -593,7 +612,7 @@ cmd_doctor() {
       && ok "routeur sain" || { fail "routeur non sain"; rc=1; }
     docker exec "$EDGE_NAME" nginx -t >/dev/null 2>&1 && ok "configuration du routeur valide" || { fail "nginx -t du routeur en échec"; rc=1; }
     for c in $origins; do
-      p=$(label "$c" org.mi-kandra.project); a=$(label "$c" org.mi-kandra.origin-alias); d=$(label "$c" org.mi-kandra.domains)
+      p=$(label "$c" org.mi-kandra.project); a=$(label "$c" org.mi-kandra.origin-alias); d=$(origin_domains "$c")
       st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$c" 2>/dev/null)
       case "$st" in healthy|running) ok "$p : origin $st";; *) fail "$p : origin $st"; rc=1;; esac
       for dom in $d; do
@@ -616,14 +635,14 @@ cmd_doctor() {
   if [ "$probe" -eq 1 ]; then
     for c in $origins; do
       pr_p=$(label "$c" org.mi-kandra.project)
-      for pr_d in $(label "$c" org.mi-kandra.domains); do
+      for pr_d in $(origin_domains "$c"); do
         pr_d=${pr_d#\*.}; pr_d=${pr_d#.}
         probe_domain "$pr_p" "$pr_d" || rc=1
       done
     done
   fi
   # Deux projets qui revendiquent le même domaine = détournement de trafic.
-  dup=$(for c in $origins; do label "$c" org.mi-kandra.domains; done | tr ' ' '\n' | sed 's/^\*\.//;s/^\.//' | grep . | sort | uniq -d)
+  dup=$(for c in $origins; do origin_domains "$c"; echo; done | tr ' ' '\n' | sed 's/^\*\.//;s/^\.//' | grep . | sort | uniq -d)
   [ -z "$dup" ] && ok "aucun domaine revendiqué par deux projets" || { fail "domaines en double : $dup"; rc=1; }
   return $rc
 }

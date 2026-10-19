@@ -1,0 +1,6 @@
+# Fichiers exécutés ou lus sur le serveur Linux : toujours en LF, même sur un poste
+# Windows (core.autocrlf=true), sinon sh et nginx échouent sur les « \r ».
+*.sh          text eol=lf
+*.conf        text eol=lf
+*.template    text eol=lf
+.env.example  text eol=lf
