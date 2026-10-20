@@ -1198,6 +1198,17 @@ class AppStrings {
       _t('Aucun favori', 'No favorites yet', mg: 'Tsy mbola misy tiana');
   String get inFolder => _t('dans', 'in', mg: 'ao');
 
+  // Hidden index folders (index.note / index.img)
+  String get indexAllNotes =>
+      _t('Toutes les notes', 'All notes', mg: 'Naoty rehetra');
+  String get indexAllImages =>
+      _t('Toutes les images', 'All images', mg: 'Sary rehetra');
+  String get indexEmpty => _t(
+        'Rien ici, ni dans les sous-dossiers.',
+        'Nothing here, nor in the sub-folders.',
+        mg: "Tsy misy na eto na ao amin'ny zana-dossier.",
+      );
+
   // Settings
   String get appearance => _t('Apparence', 'Appearance', mg: 'Endrika');
   String get theme => _t('Thème', 'Theme', mg: 'Lohahevitra');

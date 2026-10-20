@@ -794,7 +794,7 @@ class _EntryView extends ConsumerWidget {
   void _open(BuildContext context, WidgetRef ref, LibraryEntry e) {
     if (e.isFolder) {
       ref.read(selectedEntriesProvider.notifier).state = <String>{};
-      context.push(browseRoute(e.path));
+      context.push(folderRoute(e));
     } else if (e.isNote) {
       context.push(noteRoute(e.path));
     } else if (e.isTable) {
@@ -804,8 +804,16 @@ class _EntryView extends ConsumerWidget {
     }
   }
 
+  /// Index folders show what they gather ("Toutes les notes"), not their name.
+  String _title(LibraryEntry e, AppStrings strings) => switch (indexKindOf(e)) {
+        EntryKind.note => strings.indexAllNotes,
+        EntryKind.image => strings.indexAllImages,
+        _ => e.displayName,
+      };
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final strings = ref.watch(appStringsProvider);
     final compact =
         MediaQuery.sizeOf(context).width < AppConstants.desktopBreakpoint;
     final bottomPadding = AppConstants.defaultPadding +
@@ -844,8 +852,12 @@ class _EntryView extends ConsumerWidget {
                       selected: isSelected,
                       selecting: selecting,
                     ),
-              title: Text(e.displayName),
-              subtitle: e.isFolder ? _tagsLine(e) : _fileSubtitle(e),
+              title: Text(_title(e, strings)),
+              subtitle: indexKindOf(e) != null
+                  ? Text(e.name)
+                  : e.isFolder
+                      ? _tagsLine(e)
+                      : _fileSubtitle(e),
               trailing: selecting
                   ? null
                   : _EntryTrailingActions(
@@ -927,7 +939,7 @@ class _EntryView extends ConsumerWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          e.displayName,
+                          _title(e, strings),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,
@@ -1030,6 +1042,12 @@ class _EntryThumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.primary;
 
+    final index = indexKindOf(entry);
+    if (index != null) {
+      return _IndexFolderThumb(
+          images: index == EntryKind.image, size: size, fill: fill);
+    }
+
     if (entry.isImage && canRenderThumbnail(entry.name)) {
       final image = Image.file(
         File(entry.path),
@@ -1058,6 +1076,71 @@ class _EntryThumb extends StatelessWidget {
     }
 
     return icon;
+  }
+}
+
+/// The coloured "Pro" look of an `index.note` / `index.img` folder.
+class _IndexFolderThumb extends StatelessWidget {
+  const _IndexFolderThumb({required this.images, this.size, this.fill = false});
+
+  final bool images;
+  final double? size;
+  final bool fill;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = images
+        ? const [Color(0xFFEC4899), Color(0xFF8B5CF6)] // pink -> violet
+        : const [Color(0xFFF59E0B), Color(0xFFEA580C)]; // amber -> orange
+    final gradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: colors,
+    );
+    final icon =
+        images ? Icons.photo_library_rounded : Icons.collections_bookmark;
+
+    if (!fill) {
+      final side = size ?? 24;
+      return Container(
+        width: side,
+        height: side,
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(side * 0.22),
+        ),
+        child: Icon(icon, color: Colors.white, size: side * 0.6),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(gradient: gradient),
+      child: Stack(
+        children: [
+          Center(child: Icon(icon, color: Colors.white, size: 44)),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'PRO',
+                style: TextStyle(
+                  color: colors.last,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -16,7 +16,7 @@ class FavoritesScreen extends ConsumerWidget {
 
   void _open(BuildContext context, LibraryEntry e) {
     if (e.isFolder) {
-      context.push(browseRoute(e.path));
+      context.push(folderRoute(e));
     } else if (e.isNote) {
       context.push(noteRoute(e.path));
     } else if (e.isTable) {

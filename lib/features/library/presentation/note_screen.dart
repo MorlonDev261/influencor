@@ -757,6 +757,29 @@ class _NoteScreenState extends ConsumerState<NoteScreen> {
 
   // --- Edit mode -------------------------------------------------------------
 
+  /// Note fields keep a visible outline: the theme's borderless fill matches
+  /// the page background, so without it the title and content blend in.
+  InputDecoration _outlined({
+    required String labelText,
+    String? hintText,
+    bool alignLabelWithHint = false,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    OutlineInputBorder border(Color color, [double width = 1]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: color, width: width),
+        );
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      alignLabelWithHint: alignLabelWithHint,
+      border: border(scheme.outline),
+      enabledBorder: border(scheme.outline),
+      focusedBorder: border(scheme.primary, 2),
+    );
+  }
+
   Widget _buildEdit(
     AppStrings strings,
     List<String> images,
@@ -768,7 +791,7 @@ class _NoteScreenState extends ConsumerState<NoteScreen> {
         TextField(
           controller: _titleController,
           focusNode: _titleFocus,
-          decoration: InputDecoration(
+          decoration: _outlined(
             labelText: strings.noteTitle,
             hintText: strings.noteTitleHint,
           ),
@@ -792,7 +815,7 @@ class _NoteScreenState extends ConsumerState<NoteScreen> {
             fontSize: 16,
             height: 1.4,
           ),
-          decoration: InputDecoration(
+          decoration: _outlined(
             labelText: strings.noteContent,
             alignLabelWithHint: true,
           ),
@@ -944,7 +967,7 @@ class _NoteMoreMenu extends StatelessWidget {
         PopupMenuItem(
           value: _NoteMenuAction.copyNote,
           enabled: !isEmpty && onCopyNote != null,
-          child: _menuRow(Icons.notes_outlined, strings.copyForSocial),
+          child: _menuRow(Icons.copy, strings.copyForSocial),
         ),
         PopupMenuItem(
           value: _NoteMenuAction.copyNoteMedia,

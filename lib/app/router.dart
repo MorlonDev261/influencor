@@ -12,6 +12,7 @@ import '../features/assistant/presentation/assistant_screen.dart';
 import '../features/favorites/presentation/favorites_screen.dart';
 import '../features/home/presentation/home_screen.dart';
 import '../features/library/presentation/browse_screen.dart';
+import '../features/library/presentation/index_screen.dart';
 import '../features/library/presentation/note_screen.dart';
 import '../features/library/presentation/preview_screen.dart';
 import '../features/library/presentation/table_screen.dart';
@@ -66,6 +67,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: path,
                 paths: extra is List<String> ? extra : null,
               );
+            },
+          ),
+          GoRoute(
+            path: '/index',
+            builder: (context, state) {
+              final q = state.uri.queryParameters;
+              final dir = q['dir'];
+              if (dir == null) return const HomeScreen();
+              return IndexScreen(dir: dir, images: q['kind'] == 'image');
             },
           ),
           GoRoute(

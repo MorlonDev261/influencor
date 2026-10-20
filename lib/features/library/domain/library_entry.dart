@@ -55,6 +55,21 @@ class LibraryEntry {
   int get hashCode => path.hashCode;
 }
 
+/// Hidden "index" folders: a folder named `index.note` or `index.img` (any
+/// case) shows as a coloured Pro folder that lists every note / image of the
+/// folder it sits in, sub-folders included at any depth. Returns the kind it
+/// gathers, or null for an ordinary entry.
+EntryKind? indexKindOf(LibraryEntry entry) {
+  if (!entry.isFolder) return null;
+  switch (entry.name.toLowerCase()) {
+    case 'index.note':
+      return EntryKind.note;
+    case 'index.img':
+      return EntryKind.image;
+  }
+  return null;
+}
+
 /// File extensions recognised as images and videos.
 const imageExtensions = {
   '.jpg',

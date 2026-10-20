@@ -206,25 +206,34 @@ class UnicodeStyler {
     return String.fromCharCode(cp);
   }
 
+  // Bold and bold-italic use the sans-serif alphabets (𝗕, 𝘽): a clean bold
+  // that reads like the app font. The older serif ones (𝐁, 𝑩) stay readable
+  // through [_legacyUpperBase] so notes saved before keep toggling off.
   static const Map<UnicodeAlphabet, int> _upperBase = {
-    UnicodeAlphabet.bold: 0x1D400,
+    UnicodeAlphabet.bold: 0x1D5D4,
     UnicodeAlphabet.italic: 0x1D434,
-    UnicodeAlphabet.boldItalic: 0x1D468,
+    UnicodeAlphabet.boldItalic: 0x1D63C,
     UnicodeAlphabet.monospace: 0x1D670,
   };
 
   static const Map<UnicodeAlphabet, int> _lowerBase = {
-    UnicodeAlphabet.bold: 0x1D41A,
+    UnicodeAlphabet.bold: 0x1D5EE,
     UnicodeAlphabet.italic: 0x1D44E,
-    UnicodeAlphabet.boldItalic: 0x1D482,
+    UnicodeAlphabet.boldItalic: 0x1D656,
     UnicodeAlphabet.monospace: 0x1D68A,
   };
 
   static const Map<UnicodeAlphabet, int?> _digitBase = {
-    UnicodeAlphabet.bold: 0x1D7CE,
+    UnicodeAlphabet.bold: 0x1D7EC,
     UnicodeAlphabet.italic: null,
-    UnicodeAlphabet.boldItalic: 0x1D7CE,
+    UnicodeAlphabet.boldItalic: 0x1D7EC,
     UnicodeAlphabet.monospace: 0x1D7F6,
+  };
+
+  // Serif bold alphabets written by earlier builds: (upper, lower, digits).
+  static const Map<UnicodeAlphabet, (int, int, int)> _legacyBases = {
+    UnicodeAlphabet.bold: (0x1D400, 0x1D41A, 0x1D7CE),
+    UnicodeAlphabet.boldItalic: (0x1D468, 0x1D482, 0x1D7CE),
   };
 
   static const Map<UnicodeAlphabet, Map<int, int>> _lowerExceptions = {
@@ -250,6 +259,16 @@ class UnicodeStyler {
         }
       }
     }
+    _legacyBases.forEach((_, b) {
+      final (upper, lower, digits) = b;
+      for (var i = 0; i < 26; i++) {
+        map[upper + i] = 0x41 + i;
+        map[lower + i] = 0x61 + i;
+      }
+      for (var i = 0; i < 10; i++) {
+        map[digits + i] = 0x30 + i;
+      }
+    });
     // Exceptions (styled -> ascii).
     _lowerExceptions.forEach((_, ex) {
       ex.forEach((ascii, styled) => map[styled] = ascii);
@@ -265,6 +284,13 @@ class UnicodeStyler {
         map[_lowerBase[a]! + i] = a;
       }
     }
+    _legacyBases.forEach((a, b) {
+      final (upper, lower, _) = b;
+      for (var i = 0; i < 26; i++) {
+        map[upper + i] = a;
+        map[lower + i] = a;
+      }
+    });
     _lowerExceptions.forEach((a, ex) {
       ex.forEach((_, styled) => map[styled] = a);
     });

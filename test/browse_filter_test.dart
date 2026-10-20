@@ -173,4 +173,41 @@ void main() {
       ]);
     });
   });
+
+  group('index folders (index.note / index.img)', () {
+    test('only folders with the exact name (any case) are index folders', () {
+      expect(indexKindOf(_folder(at(['index.note']))), EntryKind.note);
+      expect(indexKindOf(_folder(at(['INDEX.IMG']))), EntryKind.image);
+      expect(indexKindOf(_folder(at(['index.notes']))), isNull);
+      expect(indexKindOf(_folder(at(['Mes notes']))), isNull);
+      // A note titled "index.note" is a file, not the Pro folder.
+      expect(indexKindOf(_file(at(['index.note.md']))), isNull);
+    });
+
+    test('gathers every match however deep, nothing else', () {
+      final recursive = [
+        _folder(at(['index.note'])),
+        _file(at(['a.md'])),
+        _folder(at(['A'])),
+        _folder(at(['A', 'B'])),
+        _folder(at(['A', 'B', 'C'])),
+        _file(at(['A', 'B', 'C', 'deep.md'])),
+        _file(at(['A', 'photo.png'])),
+        _file(at(['A', 'B', 'mid.md'])),
+      ];
+      expect(
+          _paths(indexedEntries(recursive, EntryKind.note, SortOption.nameAsc)),
+          [
+            at(['a.md']),
+            at(['A', 'B', 'C', 'deep.md']),
+            at(['A', 'B', 'mid.md']),
+          ]);
+      expect(
+          _paths(
+              indexedEntries(recursive, EntryKind.image, SortOption.nameAsc)),
+          [
+            at(['A', 'photo.png'])
+          ]);
+    });
+  });
 }

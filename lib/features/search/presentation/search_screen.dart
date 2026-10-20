@@ -58,7 +58,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   void _open(LibraryEntry e, List<LibraryEntry> results) {
     if (e.isFolder) {
-      context.push(browseRoute(e.path));
+      context.push(folderRoute(e));
     } else if (e.isNote) {
       context.push(noteRoute(e.path));
     } else if (e.isTable) {

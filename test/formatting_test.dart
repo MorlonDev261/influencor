@@ -12,11 +12,11 @@ void main() {
   group('transform: alphabets', () {
     test('bold letters and digits', () {
       expect(runes(styler.transform('A', const InlineStyle(bold: true))),
-          [0x1D400]);
+          [0x1D5D4]);
       expect(runes(styler.transform('a', const InlineStyle(bold: true))),
-          [0x1D41A]);
+          [0x1D5EE]);
       expect(runes(styler.transform('0', const InlineStyle(bold: true))),
-          [0x1D7CE]);
+          [0x1D7EC]);
     });
 
     test('italic, no italic digits (fallback to plain)', () {
@@ -35,7 +35,7 @@ void main() {
       expect(
           runes(styler.transform(
               'A', const InlineStyle(bold: true, italic: true))),
-          [0x1D468]);
+          [0x1D63C]);
     });
 
     test('code/monospace has priority over bold+italic', () {
@@ -59,7 +59,7 @@ void main() {
       expect(
           runes(styler.transform(
               'A', const InlineStyle(bold: true, strike: true))),
-          [0x1D400, 0x0336]);
+          [0x1D5D4, 0x0336]);
     });
 
     test('legacy U+0335 strike is still detected and removable', () {
@@ -72,13 +72,13 @@ void main() {
   group('transform: accents & international', () {
     test('é bold keeps the accent (𝐞 + combining acute)', () {
       expect(runes(styler.transform('é', const InlineStyle(bold: true))),
-          [0x1D41E, 0x0301]);
+          [0x1D5F2, 0x0301]);
     });
     test('É bold keeps accent, ç bold keeps cedilla', () {
       expect(runes(styler.transform('É', const InlineStyle(bold: true))),
-          [0x1D404, 0x0301]);
+          [0x1D5D8, 0x0301]);
       expect(runes(styler.transform('ç', const InlineStyle(bold: true))),
-          [0x1D41A + 2, 0x0327]);
+          [0x1D5EE + 2, 0x0327]);
     });
     test('Spécial bold keeps é, no precomposed U+00E9', () {
       final out = styler.transform('Spécial', const InlineStyle(bold: true));
@@ -123,6 +123,14 @@ void main() {
   });
 
   group('detectStyle', () {
+    test('legacy serif bold is still detected and plainified', () {
+      // Serif bold "Prix 2" and bold-italic "A" from builds before sans-serif.
+      const legacy = '\u{1D40F}\u{1D42B}\u{1D422}\u{1D431} \u{1D7D0}';
+      expect(styler.detectStyle(legacy), const InlineStyle(bold: true));
+      expect(styler.plainify(legacy), 'Prix 2');
+      expect(styler.detectStyle('\u{1D468}'),
+          const InlineStyle(bold: true, italic: true));
+    });
     test('detects bold', () {
       final s = styler.transform('X', const InlineStyle(bold: true));
       expect(styler.detectStyle(s), const InlineStyle(bold: true));

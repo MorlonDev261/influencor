@@ -67,6 +67,12 @@ List<LibraryEntry> entriesForFilter(
   return [for (final s in scored) s.$1];
 }
 
+/// Every entry of [kind] in a recursive listing (see `indexKindOf`): the flat
+/// view an `index.note` / `index.img` folder opens, however deep each item is.
+List<LibraryEntry> indexedEntries(
+        List<LibraryEntry> recursive, EntryKind kind, SortOption sort) =>
+    sortEntries([for (final e in recursive) if (e.kind == kind) e], sort);
+
 /// Sorts entries with folders first, then by the chosen [sort] option.
 List<LibraryEntry> sortEntries(List<LibraryEntry> entries, SortOption sort) {
   final sorted = [...entries];
