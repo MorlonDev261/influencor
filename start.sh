@@ -8,6 +8,7 @@
 #   ./start.sh            démarre nginx (sert build/web), cohabite avec les autres stacks
 #   ./start.sh --build    construit d'abord le site (flutter build web --release)
 #   ./start.sh --stop     arrête le conteneur
+#   ./start.sh --logs     journaux du nginx, lisibles (--errors, --grep <texte>, --since 1h, --raw)
 #   ./start.sh --status   état Mi Kandra (mode, routes) + sonde publique de chaque domaine
 #
 # Domaines — à chaud : l'app n'est jamais redémarrée (nginx -s reload, sans coupure) :
@@ -380,6 +381,13 @@ cmd_renew() {
 # ── Point d'entrée ───────────────────────────────────────────────────────────
 CMD=${1:-}
 if [ $# -gt 0 ]; then shift; fi
+# --logs a ses propres filtres (scripts/logs-view.sh) : traité avant la lecture
+# des options, qui refuserait --errors, --grep…
+if [ "$CMD" = "--logs" ]; then
+  command -v bash >/dev/null 2>&1 || exec docker compose logs -f --tail=200 nginx
+  LOGS_TITLE="Influencor" LOGS_PREFIX="influencor-" LOGS_DEFAULT_SERVICES="nginx" \
+    exec bash scripts/logs-view.sh "$@"
+fi
 FORCE=0; PURGE=0; ARG=""
 for a in "$@"; do
   case "$a" in
