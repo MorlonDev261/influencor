@@ -78,7 +78,7 @@ class _ChooseWorkspace extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Image.asset(
-              'assets/icon/icon.png',
+              'assets/icon/logo.png',
               width: 160,
               height: 160,
               filterQuality: FilterQuality.medium,

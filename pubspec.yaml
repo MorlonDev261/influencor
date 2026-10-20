@@ -78,7 +78,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/icon/icon.png
+    - assets/icon/logo.png
     - assets/deganeo/logo-Deganeo.svg
 
 # App launcher icons (run: dart run flutter_launcher_icons)
@@ -93,17 +93,17 @@ flutter_launcher_icons:
   ios: true
   remove_alpha_ios: true
   background_color_ios: "#204DA0"
+  # Web et macOS : logos arrondis generes par tools/round_icon.py (meme rayon
+  # que l'app et Windows) ; ne pas les regenerer en carre ici.
   web:
-    generate: true
-    background_color: "#204DA0"
-    theme_color: "#204DA0"
+    generate: false
   windows:
     generate: true
-    # Coins arrondis (20%) pour le bureau ; genere par tools/round_icon.py.
+    # Coins arrondis pour le bureau ; genere par tools/round_icon.py.
     image_path: "assets/icon/icon_rounded.png"
     icon_size: 256
   macos:
-    generate: true
+    generate: false
 
 # Microsoft Store package (run after `flutter build windows --release`:
 # dart run msix:create). The Store signs the package itself, so no certificate
@@ -117,7 +117,7 @@ msix_config:
   identity_name: # Package/Identity/Name
   publisher: # Package/Identity/Publisher (CN=...)
   publisher_display_name: # Package/Properties/PublisherDisplayName
-  logo_path: assets/icon/icon_blue.png
+  logo_path: assets/icon/icon_rounded.png
   languages: fr-fr, en-us
   capabilities: internetClient
   store: true

@@ -114,7 +114,7 @@ class AppShell extends ConsumerWidget {
                 leading: const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Image(
-                    image: AssetImage('assets/icon/icon.png'),
+                    image: AssetImage('assets/icon/logo.png'),
                     width: 36,
                     height: 36,
                   ),

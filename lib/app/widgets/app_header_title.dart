@@ -41,7 +41,7 @@ class AppHeaderTitle extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Image.asset(
-                'assets/icon/icon.png',
+                'assets/icon/logo.png',
                 width: 28,
                 height: 28,
                 filterQuality: FilterQuality.medium,

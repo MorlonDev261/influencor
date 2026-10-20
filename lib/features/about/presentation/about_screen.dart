@@ -75,7 +75,7 @@ class AboutScreen extends ConsumerWidget {
                   child: Column(
                     children: [
                       Image.asset(
-                        'assets/icon/icon.png',
+                        'assets/icon/logo.png',
                         width: 96,
                         height: 96,
                         filterQuality: FilterQuality.medium,
