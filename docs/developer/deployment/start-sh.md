@@ -29,15 +29,16 @@ flowchart TD
     E -->|"--status"| E2[état Mi Kandra puis sonde publique] --> Z0
     E -->|"--build"| E3{flutter installé ?}
     E3 -- non --> X2([erreur : flutter est requis])
-    E3 -- oui --> E4[flutter build web --release --no-wasm-dry-run] --> F
+    E3 -- oui --> E4[build/web mis de côté, flutter build web --release --no-wasm-dry-run ; échec = ancien build remis en place] --> F
     E -->|"aucune"| DD{aucun domaine, ou influencor.mi-kandra.org ?}
     DD -- oui --> X0([erreur : ./start.sh --domain-add domaine])
     DD -- non --> F{build/web/index.html présent ?}
     F -- non --> X3([erreur : lancez --build ou copiez le build web])
     F -- oui --> H[cohabitation : choix mémorisé, puis ports selon le mode détecté]
     H --> G[génère nginx/sites/domaine.conf pour chaque domaine]
-    G --> I[docker compose up -d --remove-orphans]
-    I --> J{mode du routeur}
+    G --> I[docker compose up -d --remove-orphans, puis redémarrage de nginx après un --build]
+    I --> I2[attente : nginx sert sa configuration complète]
+    I2 --> J{mode du routeur}
     J -- partagé --> J1[edge sync : enregistre la route dans le routeur partagé]
     J -- en attente --> J2[adopt --yes si MI_KANDRA_EDGE_AUTOADOPT=1]
     J -- autonome --> K
@@ -61,7 +62,7 @@ Modes de cohabitation, détectés par `scripts/edge/mi-kandra-edge.sh` :
 | Commande | Description |
 |---|---|
 | `./start.sh` | Démarre nginx, qui sert `build/web`, et cohabite avec les autres stacks. Exige un `build/web` existant. |
-| `./start.sh --build` | Construit d'abord le site (`flutter build web --release --no-wasm-dry-run`), puis démarre. |
+| `./start.sh --build` | Construit d'abord le site (`flutter build web --release --no-wasm-dry-run`), puis démarre. Le site en ligne reste servi pendant le build (`build/web` mis de côté dans `build/web.prev`) ; un build raté le remet en place. nginx est redémarré à la fin pour servir le nouveau build. |
 | `./start.sh --stop` | Arrête le conteneur (`docker compose down`). |
 | `./start.sh --status` | État Mi Kandra (mode, routes) puis sonde du lien public de chaque domaine. |
 | `./start.sh --domains` | Liste les domaines, l'origine de leur certificat (manuel, letsencrypt, ancien, aucun) et l'expiration réellement servie. |

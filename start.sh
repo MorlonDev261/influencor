@@ -378,6 +378,30 @@ cmd_renew() {
   if nginx_running; then reload_nginx && say "certificats rechargés, sans redémarrage."; fi
 }
 
+# ── Build ────────────────────────────────────────────────────────────────────
+# Le site en ligne n'est jamais vide ni cassé pendant le build : build/web est
+# d'abord mis de côté dans build/web.prev. nginx (bind mount, suivi par inode
+# sous Linux) continue de le servir tant qu'il n'est pas redémarré ; un build
+# raté le remet en place. Il n'est supprimé qu'après le redémarrage de nginx.
+restore_previous_web() {
+  [ -d build/web.prev ] || return 0
+  rm -rf build/web
+  mv build/web.prev build/web
+}
+build_web() {
+  command -v flutter >/dev/null 2>&1 || die "flutter est requis pour --build."
+  # Reste d'un build interrompu : build/web incomplet, le site servi est dans
+  # build/web.prev → on le remet en place avant de recommencer.
+  if [ -d build/web.prev ] && [ ! -f build/web/index.html ]; then restore_previous_web; fi
+  rm -rf build/web.prev
+  [ ! -d build/web ] || mv build/web build/web.prev
+  trap 'restore_previous_web; exit 130' INT TERM HUP
+  flutter build web --release --no-wasm-dry-run \
+    || { restore_previous_web; die "le build a échoué (site en ligne inchangé)."; }
+  [ -f build/web/index.html ] || { restore_previous_web; die "build terminé mais build/web/index.html est absent (site en ligne inchangé)."; }
+  trap - INT TERM HUP
+}
+
 # ── Point d'entrée ───────────────────────────────────────────────────────────
 CMD=${1:-}
 if [ $# -gt 0 ]; then shift; fi
@@ -388,7 +412,7 @@ if [ "$CMD" = "--logs" ]; then
   LOGS_TITLE="Influencor" LOGS_PREFIX="influencor-" LOGS_DEFAULT_SERVICES="nginx" \
     exec bash scripts/logs-view.sh "$@"
 fi
-FORCE=0; PURGE=0; ARG=""
+FORCE=0; PURGE=0; ARG=""; BUILT=0
 for a in "$@"; do
   case "$a" in
     --force) FORCE=1 ;;
@@ -406,8 +430,7 @@ case "$CMD" in
   --domain-add)    cmd_domain_add "$ARG"; exit 0 ;;
   --domain-remove) cmd_domain_remove "$ARG"; exit 0 ;;
   --renew)         cmd_renew; exit 0 ;;
-  --build)         command -v flutter >/dev/null 2>&1 || die "flutter est requis pour --build."
-                   flutter build web --release --no-wasm-dry-run ;;
+  --build)         build_web; BUILT=1 ;;
   "") : ;;
   *) die "option inconnue : $CMD (voir l'en-tête de ce fichier)" ;;
 esac
@@ -427,6 +450,15 @@ detect_mode
 
 render_all
 docker compose up -d --remove-orphans
+# Le build recrée build/web : sous Linux, nginx continue de servir l'ancien
+# dossier (build/web.prev) jusqu'à son redémarrage, qui bascule sur le nouveau.
+if [ "$BUILT" = 1 ]; then
+  docker compose restart nginx
+  rm -rf build/web.prev
+fi
+# nginx doit servir sa configuration complète avant d'être annoncé au routeur
+# partagé et avant toute émission de certificat.
+wait_nginx || die "$NGINX_CTR ne répond pas : docker logs $NGINX_CTR"
 
 # Enregistre la route dans le routeur partagé (sans effet en mode autonome).
 case "$MODE" in
@@ -438,7 +470,6 @@ esac
 pending_certs=""
 for d in $(domains); do [ -n "$(cert_for "$d")" ] || pending_certs="$pending_certs $d"; done
 if [ -n "$pending_certs" ]; then
-  wait_nginx || die "$NGINX_CTR ne répond pas : docker logs $NGINX_CTR"
   reload_nginx || die "configuration nginx rejetée (voir ci-dessus)."
   for d in $pending_certs; do
     if issue_cert "$d"; then render_site "$d"
