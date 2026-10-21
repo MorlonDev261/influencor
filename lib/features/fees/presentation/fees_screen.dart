@@ -7,6 +7,7 @@ import '../../../core/l10n/app_strings.dart';
 import '../../accounting/presentation/accounting_screen.dart' show formatAr;
 import '../application/tariff_providers.dart';
 import '../domain/mobile_money_fees.dart';
+import 'operator_logo.dart';
 
 class FeesScreen extends ConsumerStatefulWidget {
   const FeesScreen({super.key});
@@ -23,6 +24,9 @@ class _FeesScreenState extends ConsumerState<FeesScreen> {
   String? _operatorName;
   TransferTarget _target = TransferTarget.same;
   bool _app = false;
+
+  /// The amount is the balance: fees are taken out of it.
+  bool _feesIncluded = false;
 
   @override
   void dispose() {
@@ -41,10 +45,14 @@ class _FeesScreenState extends ConsumerState<FeesScreen> {
     );
     final value = AppAmountField.parse(_amount.text);
     final valid = value != null && value > 0;
-    final plan = valid
-        ? _optimizer.plan(operator, _kind, value,
-            target: _target, app: _app && operator.transferApp != null)
-        : null;
+    final app = _app && operator.transferApp != null;
+    final plan = !valid
+        ? null
+        : _feesIncluded
+            ? _optimizer.planWithin(operator, _kind, value,
+                target: _target, app: app)
+            : _optimizer.plan(operator, _kind, value,
+                target: _target, app: app);
     final others = tariffs
         .where((t) => t.name != operator.name)
         .map((t) => t.name)
@@ -65,6 +73,7 @@ class _FeesScreenState extends ConsumerState<FeesScreen> {
           AppSectionLabel(s.feeOperator),
           AppChoiceChips<String>(
             options: [for (final t in tariffs) (t.name, t.name)],
+            avatar: (name) => OperatorLogo(name, size: 20),
             selected: operator.name,
             onChanged: (name) => setState(() {
               _operatorName = name;
@@ -117,17 +126,30 @@ class _FeesScreenState extends ConsumerState<FeesScreen> {
               ),
             ],
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(s.feeIncludeFees),
+            subtitle: _feesIncluded ? Text(s.feeIncludeFeesHint) : null,
+            value: _feesIncluded,
+            onChanged: (v) => setState(() => _feesIncluded = v),
+          ),
           AppAmountField(
             controller: _amount,
-            label: s.amount,
+            label: _feesIncluded ? s.feeBalance : s.amount,
             hint: s.example('50 000'),
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
           if (valid && plan == null)
             Text(s.feeNoPlan, style: TextStyle(color: theme.colorScheme.error)),
-          if (plan != null) _PlanCard(plan: plan, best: true, strings: s),
+          if (plan != null)
+            _PlanCard(
+              plan: plan,
+              best: true,
+              strings: s,
+              balance: _feesIncluded ? value : null,
+            ),
           const SizedBox(height: 8),
           Text(s.feeUnverified, style: theme.textTheme.bodySmall),
         ],
@@ -141,16 +163,22 @@ class _PlanCard extends StatelessWidget {
     required this.plan,
     required this.best,
     required this.strings,
+    this.balance,
   });
 
   final FeePlan plan;
   final bool best;
   final AppStrings strings;
 
+  /// Set when fees are included: the balance the plan was fitted into.
+  final int? balance;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final withdraw = plan.kind == FeeKind.withdraw;
+    final debited = plan.amount + plan.totalFee;
     return Card(
       color: best ? scheme.primaryContainer : null,
       child: Padding(
@@ -160,6 +188,8 @@ class _PlanCard extends StatelessWidget {
           children: [
             Row(
               children: [
+                OperatorLogo(plan.operator, size: 28),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(plan.operator,
                       style: theme.textTheme.titleMedium
@@ -172,6 +202,27 @@ class _PlanCard extends StatelessWidget {
                   ),
               ],
             ),
+            // Splitting wins: show what the direct operation would cost first.
+            if (plan.isSplit && plan.directFee != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${withdraw ? strings.feeDirectWithdraw : strings.feeDirectTransfer}'
+                ' : ${formatAr(plan.directFee!)}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: scheme.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+            if (balance != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${withdraw ? strings.feeNetWithdraw : strings.feeNetTransfer}'
+                ' : ${formatAr(plan.amount)}',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
             const SizedBox(height: 4),
             Text(
               '${strings.feeTotal}: ${formatAr(plan.totalFee)}'
@@ -198,6 +249,12 @@ class _PlanCard extends StatelessWidget {
                   ),
                 ),
             ],
+            const SizedBox(height: 8),
+            Text('${strings.feeDebited} : ${formatAr(debited)}',
+                style: theme.textTheme.bodyMedium),
+            if (balance != null && balance! > debited)
+              Text('${strings.feeLeft} : ${formatAr(balance! - debited)}',
+                  style: theme.textTheme.bodySmall),
           ],
         ),
       ),

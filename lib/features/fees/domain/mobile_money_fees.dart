@@ -206,6 +206,52 @@ class FeeOptimizer {
     );
   }
 
+  /// Fees included: [budget] (e.g. the whole balance) must pay the amount
+  /// *and* its fees. Returns the cheapest plan for the largest amount that
+  /// still fits, or null when not even the smallest operation fits.
+  FeePlan? planWithin(
+    OperatorTariff tariff,
+    FeeKind kind,
+    int budget, {
+    TransferTarget target = TransferTarget.same,
+    bool app = false,
+  }) {
+    FeePlan? fits(int amount) {
+      final p = plan(tariff, kind, amount, target: target, app: app);
+      return p != null && amount + p.totalFee <= budget ? p : null;
+    }
+
+    final brackets = tariff.bracketsFor(kind, target, app);
+    if (brackets.isEmpty) return null;
+    final smallest = brackets.map((b) => b.min).reduce((a, b) => a < b ? a : b);
+    final whole = fits(budget);
+    if (whole != null) return whole;
+
+    var lo = smallest < 1 ? 1 : smallest;
+    if (lo >= budget) return null;
+    var best = fits(lo);
+    if (best == null) return null;
+
+    // Fees grow with the amount, so the largest fitting amount is found by
+    // bisection between a fitting [lo] and a non-fitting [hi].
+    var hi = budget;
+    while (hi - lo > 1) {
+      final mid = lo + (hi - lo) ~/ 2;
+      final p = fits(mid);
+      if (p != null) {
+        lo = mid;
+        best = p;
+      } else {
+        hi = mid;
+      }
+    }
+
+    // Fees are steps: a larger amount paying the same fee may still fit.
+    final retry = budget - best!.totalFee;
+    if (retry > lo) return fits(retry) ?? best;
+    return best;
+  }
+
   /// Exhaustive search over multisets of brackets (≤ [maxParts] operations).
   List<FeePart>? _exact(List<FeeBracket> brackets, int amount) {
     if (amount <= 0) return const [];

@@ -62,4 +62,33 @@ void main() {
     }
     expect(sw.elapsedMilliseconds, lessThan(5000));
   });
+  test('fees included: amount + fees fits the balance, as large as possible',
+      () {
+    for (final tariff in madagascarTariffs) {
+      for (final kind in FeeKind.values) {
+        for (final budget in [500, 10150, 26000, 51300, 250000, 3000000]) {
+          final p = optimizer.planWithin(tariff, kind, budget);
+          if (p == null) continue;
+          expect(p.amount + p.totalFee, lessThanOrEqualTo(budget));
+          // One more Ariary no longer fits.
+          final next = optimizer.plan(tariff, kind, p.amount + 1);
+          if (next != null) {
+            expect(p.amount + 1 + next.totalFee, greaterThan(budget),
+                reason: '${tariff.name} $kind $budget');
+          }
+        }
+      }
+    }
+  });
+
+  test('fees included: MVola withdrawal from a 51 300 Ar balance', () {
+    // 50 000 + 1 300 = 51 300: the whole balance is used.
+    final p = optimizer.planWithin(t('MVola'), FeeKind.withdraw, 51300)!;
+    expect(p.amount + p.totalFee, lessThanOrEqualTo(51300));
+    expect(p.amount, greaterThanOrEqualTo(50000));
+  });
+
+  test('fees included: balance below the smallest operation', () {
+    expect(optimizer.planWithin(t('MVola'), FeeKind.withdraw, 50), isNull);
+  });
 }

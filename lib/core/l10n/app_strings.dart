@@ -851,6 +851,27 @@ class AppStrings {
       mg: 'Sarany ofisialy MVola sy Orange. Hamarino alohan\'ny asa lehibe.');
   String feeSaves(String v) =>
       _t('Économie : $v', 'You save: $v', mg: 'Voatahiry: $v');
+  String get feeIncludeFees =>
+      _t('Inclure les frais dans le montant', 'Include fees in the amount',
+          mg: 'Ampidiro ao anaty vola ny sarany');
+  String get feeIncludeFeesHint => _t(
+      'Saisissez votre solde : on calcule le maximum possible, frais compris.',
+      'Enter your balance: we compute the maximum possible, fees included.',
+      mg: 'Ampidiro ny volanao: kajiana ny farany azo atao, sarany tafiditra.');
+  String get feeBalance =>
+      _t('Solde disponible', 'Available balance', mg: 'Vola misy');
+  String get feeDirectWithdraw =>
+      _t('Retrait direct', 'Direct withdrawal', mg: 'Fanesorana mivantana');
+  String get feeDirectTransfer =>
+      _t('Transfert direct', 'Direct transfer', mg: 'Famindrana mivantana');
+  String get feeNetWithdraw =>
+      _t('Montant à retirer', 'Amount to withdraw', mg: 'Vola esorina');
+  String get feeNetTransfer =>
+      _t('Montant à envoyer', 'Amount to send', mg: 'Vola alefa');
+  String get feeDebited =>
+      _t('Total débité', 'Total debited', mg: 'Totaliny voaesotra');
+  String get feeLeft => _t('Reste sur le compte', 'Left on the account',
+      mg: 'Sisa ao amin’ny kaonty');
   String feeOps(int n) =>
       _t('$n opérations', '$n operations', mg: 'fampiasana $n');
   String get closeAction => _t('Fermer', 'Close', mg: 'Akatona');

@@ -5,6 +5,7 @@ import '../../../core/widgets/app_dialog.dart';
 import '../../../core/l10n/app_strings.dart';
 import '../application/tariff_providers.dart';
 import '../domain/mobile_money_fees.dart';
+import 'operator_logo.dart';
 import 'tariff_editor_screen.dart';
 
 /// Settings page listing the operators; tap one to edit its grids.
@@ -83,7 +84,7 @@ class TariffsSettingsScreen extends ConsumerWidget {
         children: [
           for (final t in tariffs)
             ListTile(
-              leading: const Icon(Icons.account_balance_wallet_outlined),
+              leading: OperatorLogo(t.name, size: 32),
               title: Text(t.name),
               subtitle: t.official ? null : Text(s.feeEstimatedTag),
               trailing: const Icon(Icons.chevron_right),

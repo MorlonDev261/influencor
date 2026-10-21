@@ -80,6 +80,7 @@ flutter:
   assets:
     - assets/icon/logo.png
     - assets/deganeo/logo-Deganeo.svg
+    - assets/operators/
 
 # App launcher icons (run: dart run flutter_launcher_icons)
 flutter_launcher_icons:

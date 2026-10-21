@@ -227,12 +227,16 @@ class AppChoiceChips<T> extends StatelessWidget {
     required this.options,
     required this.selected,
     required this.onChanged,
+    this.avatar,
   });
 
   /// value -> label, in display order.
   final List<(T, String)> options;
   final T selected;
   final ValueChanged<T> onChanged;
+
+  /// Optional leading widget per option (e.g. a logo).
+  final Widget Function(T value)? avatar;
 
   @override
   Widget build(BuildContext context) => Wrap(
@@ -241,6 +245,7 @@ class AppChoiceChips<T> extends StatelessWidget {
         children: [
           for (final (value, label) in options)
             ChoiceChip(
+              avatar: avatar?.call(value),
               label: Text(label),
               selected: value == selected,
               onSelected: (_) => onChanged(value),
