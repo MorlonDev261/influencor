@@ -24,6 +24,8 @@
 #   minlevel=0    0 = tout, 1 = avertissements et erreurs, 2 = erreurs seules
 #   grep=texte    ne garde que les lignes contenant ce texte (insensible casse)
 #   health=0      1 = garde aussi les sondes /api/health (masquées par défaut)
+#   scans=0       1 = montre aussi le trafic hors-site (lignes « mk-unmatched »
+#                 du vhost par défaut : scans d'IP, domaines d'autres projets)
 #   stacklines=12 lignes de stack trace JSON affichées avant troncature
 #   prefix=poma-  préfixe retiré des noms de conteneurs (container_name)
 #
@@ -45,7 +47,7 @@ BEGIN {
   SVC_COLOR["scheduler"] = "\033[36m"; SVC_COLOR["certbot"] = "\033[37m"
   SVC_COLOR["acme-dns"] = "\033[37m"; SVC_COLOR["web"] = "\033[96m"
   SVC_COLOR["postgres"] = "\033[94m"; SVC_COLOR["socket"] = "\033[95m"
-  SVC_COLOR["worker"] = "\033[36m"
+  SVC_COLOR["worker"] = "\033[36m";   SVC_COLOR["hors-site"] = "\033[90m"
   npal = split("\033[34m \033[35m \033[32m \033[33m \033[36m", PAL, " ")
   nextpal = 0
 }
@@ -268,7 +270,9 @@ function jsonline(msg,    n, i, k, lvl, text, extra, nc, j, ck, lines, nl, stack
 
 # Accès nginx, format « combined » :
 # 1.2.3.4 - - [20/Oct/2026:12:00:00 +0000] "GET /p HTTP/1.1" 200 123 "ref" "ua"
-function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, status, bytes, lvl, sc) {
+# Hors-site (format mi_kandra_unmatched) : même format suivi de "$host", affiché
+# en tête du chemin pour savoir quel domaine était visé.
+function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, status, bytes, lvl, sc, host) {
   if (msg !~ /^[0-9a-fA-F.:]+ - [^ ]+ \[[^]]+\] "/) return 0
   ip = substr(msg, 1, index(msg, " ") - 1)
   q1 = index(msg, "\""); rest = substr(msg, q1 + 1)
@@ -277,6 +281,11 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
   nf = split(req, f, " "); method = f[1]; path = (nf >= 2) ? f[2] : req
   split(after, f, " "); status = f[1]; bytes = f[2]
   if (status !~ /^[0-9][0-9][0-9]$/) return 0
+  if (UNMATCHED && match(msg, /"[^"]*"$/)) {
+    host = substr(msg, RSTART + 1, RLENGTH - 2)
+    if (host == "" || host == "_") host = "sans domaine"
+    path = MAG "[" host "]" R " " path
+  }
   lvl = status >= 500 ? "error" : (status >= 400 ? "warn" : "info")
   if (rank(lvl) < minlevel + 0) { SHOWN[SVC] = 0; return 1 }
   sc = status >= 500 ? RED B : (status >= 400 ? YEL : (status >= 300 ? CYN : GRN))
@@ -292,6 +301,15 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
 {
   line = $0
   sub(/\r$/, "", line)
+  # Fin de l'historique (ligne posée par logs-view.sh) : bilan du hors-site masqué.
+  if (line == "mk-history-end") {
+    if (HIDDEN) {
+      print GRY "… " HIDDEN " requête(s) hors-site masquée(s) : scans de l'IP, domaines d'autres projets (--scans pour les voir)" R
+      HIDDEN = 0
+      fflush()
+    }
+    next
+  }
   p = index(line, "| ")
   if (p > 0) { SVC = trim(substr(line, 1, p - 1)); msg = substr(line, p + 2) }
   else if (line ~ / \|$/) { SVC = trim(substr(line, 1, length(line) - 1)); msg = "" }
@@ -315,6 +333,13 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
     PROBE[SVC] = 0
     if (msg ~ / - HTTP\/1\.1 2[0-9][0-9]( [A-Za-z ]*)?$/) next
     sub(/ - HTTP\/1\.1 /, " - HTTP/1.1 GET /metrics → ", msg)
+  }
+  # Trafic hors-site (vhost par défaut, voir nginx/snippets/mi-kandra-unmatched.conf) :
+  # il n'appartient pas au projet, masqué sauf --scans, sous le nom « hors-site ».
+  UNMATCHED = 0
+  if (msg ~ /^mk-unmatched /) {
+    if (!(scans + 0)) { HIDDEN++; next }
+    msg = substr(msg, 14); SVC = "hors-site"; UNMATCHED = 1
   }
 
   # Continuation d'un événement multi-lignes (stack trace, erreur Prisma,

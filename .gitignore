@@ -111,3 +111,5 @@ app.*.map.json
 /nginx/sites/
 /nginx/letsencrypt/
 /nginx/acme/
+# Choix de cohabitation Mi Kandra (scripts/edge), propre à ce serveur.
+.mi-kandra-edge.pref

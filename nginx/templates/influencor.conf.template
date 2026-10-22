@@ -15,6 +15,7 @@
 # derrière le proxy Cloudflare (nuage orange).
 include /etc/nginx/snippets/mi-kandra-realip.conf;
 include /etc/nginx/snippets/mi-kandra-cloudflare.conf;
+include /etc/nginx/snippets/mi-kandra-unmatched.conf;
 
 # Plusieurs domaines, parfois longs : la valeur par défaut (32/64) fait échouer nginx -t.
 server_names_hash_bucket_size 128;
@@ -24,6 +25,7 @@ server {
     listen 80 default_server;
     include /etc/nginx/snippets/mi-kandra-listen-http-default.conf;
     server_name _;
+    access_log /var/log/nginx/access.log mi_kandra_unmatched;
 
     # Healthcheck Docker (local au conteneur).
     location = /healthz {

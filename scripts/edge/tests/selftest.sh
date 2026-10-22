@@ -66,6 +66,14 @@ wait_running() {
   done
   return 1
 }
+wait_edge_healthy() {
+  wh_i=0
+  while [ "$wh_i" -lt 60 ]; do
+    [ "$(docker inspect -f '{{.State.Health.Status}}' mi-kandra-edge 2>/dev/null)" = "healthy" ] && return 0
+    wh_i=$((wh_i + 1)); sleep 0.5
+  done
+  return 1
+}
 native() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
 code() { curl -sk -m 10 -o /dev/null -w '%{http_code}' --resolve "$1:443:127.0.0.1" "https://$1/" 2>/dev/null; }
 body() { curl -sk -m 10 --resolve "$1:443:127.0.0.1" "https://$1/" 2>/dev/null | tr -d '\r\n'; }
@@ -78,16 +86,16 @@ docker image inspect "$IMG" >/dev/null 2>&1 || docker pull -q "$IMG" >/dev/null 
 
 TMP=$(mktemp -d); TMPN=$(native "$TMP")
 cleanup() {
-  docker rm -f selftest-a selftest-b selftest-evil >/dev/null 2>&1
+  docker rm -f selftest-a selftest-b selftest-c selftest-d selftest-evil selftest-p53 sx-nginx-1 sy-nginx-1 >/dev/null 2>&1
   docker compose -p mi-kandra-edge -f "$(native "$EDGE_DIR")/edge-compose.yml" down >/dev/null 2>&1
   docker volume rm "$VOL" >/dev/null 2>&1; docker network rm "$NET" >/dev/null 2>&1
   rm -rf "$TMP"
 }
 trap cleanup EXIT INT TERM
 
-echo "== Préparation : certificats et deux faux projets"
+echo "== Préparation : certificats et faux projets"
 # openssl reçoit un chemin natif (sous Git Bash, un chemin /tmp/... serait mal interprété).
-for p in a b; do
+for p in a b c d; do
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=selftest-$p.example.test" \
     -addext "subjectAltName=DNS:selftest-$p.example.test" -keyout "$TMPN/$p.key" -out "$TMPN/$p.crt" >/dev/null 2>&1
   cat > "$TMP/$p.conf" <<EOF
@@ -144,12 +152,183 @@ wait_route selftest-b.example.test "routeur redémarré avec a absent : b répon
 docker start selftest-a >/dev/null 2>&1; wait_running selftest-a
 wait_route selftest-a.example.test "a revenu : trafic rétabli sans toucher au routeur"
 
-echo "== 5) doctor"
+echo "== 5) Liste de domaines (org.mi-kandra.domains-file)"
+# c : fichier seul, sans label de domaines (cas Influencor). d : label + fichier au
+# format « domaine état » (cas Pôma) — le fichier AJOUTE au label.
+mkdir -p "$TMP/dom-c" "$TMP/dom-d"
+printf '%s\n' '# un domaine par ligne' selftest-c.example.test > "$TMP/dom-c/domains.list"
+printf '%s\n' '# domaine état' 'extra-d.example.test active' > "$TMP/dom-d/domains.list"
+docker run -d --name selftest-c --network "$NET" --network-alias c-origin \
+  -l org.mi-kandra.role=origin -l org.mi-kandra.project=c -l org.mi-kandra.origin-alias=c-origin \
+  -l org.mi-kandra.domains-file=/dom/domains.list \
+  -v "$TMPN/c.conf:/etc/nginx/nginx.conf:ro" -v "$TMPN:/c:ro" -v "$TMPN/dom-c:/dom:ro" "$IMG" >/dev/null 2>&1
+docker run -d --name selftest-d --network "$NET" --network-alias d-origin \
+  -l org.mi-kandra.role=origin -l org.mi-kandra.project=d -l org.mi-kandra.origin-alias=d-origin \
+  -l org.mi-kandra.domains=selftest-d.example.test -l org.mi-kandra.domains-file=/dom/domains.list \
+  -v "$TMPN/d.conf:/etc/nginx/nginx.conf:ro" -v "$TMPN:/c:ro" -v "$TMPN/dom-d:/dom:ro" "$IMG" >/dev/null 2>&1
+wait_running selftest-c; wait_running selftest-d
+edge sync >/dev/null 2>&1; check "sync avec listes de domaines (code 0)" "$?" "0"
+wait_route selftest-c.example.test "c : domaine lu dans le fichier, sans label"
+wait_route selftest-d.example.test "d : domaine du label"
+wait_route extra-d.example.test "d : domaine ajouté par le fichier (« domaine état »)"
+check "d : domaine du fichier -> origin d" "$(body extra-d.example.test)" "origin-d"
+# Fichier illisible (ici un dossier à sa place) : une erreur passagère ne doit
+# retirer aucune route.
+rm -f "$TMP/dom-c/domains.list"; mkdir "$TMP/dom-c/domains.list"
+check "c : liste illisible -> routes conservées" "$(edge sync 2>&1 | grep -c 'c : routes actuelles conservées')" "1"
+check "c : toujours routé" "$(body selftest-c.example.test)" "origin-c"
+# Liste lue et vide, sans label : plus aucun domaine, routes retirées.
+rmdir "$TMP/dom-c/domains.list"; printf '%s\n' '# plus aucun domaine' > "$TMP/dom-c/domains.list"
+edge sync >/dev/null 2>&1; check "liste vide : sync (code 0)" "$?" "0"
+check "c : liste vide -> routes retirées" "$(docker exec mi-kandra-edge sh -c '[ -f /etc/mi-kandra-edge/routes.d/c.tls.map ] && echo présentes || echo absentes')" "absentes"
+check "c : SNI désormais refusé" "$(code selftest-c.example.test)" "000"
+check "d inchangé" "$(body selftest-d.example.test)" "origin-d"
+edge sync >/dev/null 2>&1; check "liste toujours vide : sync idempotent (code 0)" "$?" "0"
+docker rm -f selftest-c selftest-d >/dev/null 2>&1; edge unregister d >/dev/null 2>&1
+
+echo "== 6) doctor"
+check "routeur sain avant doctor" "$(wait_edge_healthy && echo healthy)" "healthy"
 edge doctor >/dev/null 2>&1; check "doctor (code 0)" "$?" "0"
 out=$(edge doctor --probe 2>&1); rc=$?
 check "doctor --probe (code 0)" "$rc" "0"
 check "sonde HTTPS de a et b" "$(printf '%s\n' "$out" | grep -c 'répond en HTTPS')" "2"
 check "alerte d'expiration du certificat (valide 2 jours)" "$(printf '%s\n' "$out" | grep -c 'expire dans moins de 21 jours')" "2"
+
+echo "== 7) Ordre de démarrage : un projet seul, puis un voisin (dans les deux sens)"
+# Deux faux projets Compose (x, y) qui publient 80/443 seuls, comme un vrai projet en
+# mode autonome. start_fake rejoue le hook de démarrage des projets : choose, env,
+# docker compose up, puis sync (shared) ou adopt (pending + MI_KANDRA_EDGE_AUTOADOPT=1).
+# Sans terminal (stdin fermé), comme un déploiement automatisé.
+docker rm -f selftest-a selftest-b >/dev/null 2>&1
+docker compose -p mi-kandra-edge -f "$(native "$EDGE_DIR")/edge-compose.yml" down >/dev/null 2>&1
+docker volume rm "$VOL" >/dev/null 2>&1
+for p in x y; do
+  mkdir -p "$TMP/proj-$p"
+  cat > "$TMP/proj-$p/nginx.conf" <<EOF
+events {}
+http {
+  server {
+    listen 80; listen 443 ssl; listen 8080; listen 8443 ssl proxy_protocol;
+    ssl_certificate     /c/a.crt;
+    ssl_certificate_key /c/a.key;
+    location / { default_type text/plain; return 200 "origin-$p\n"; }
+  }
+}
+EOF
+  dp=$([ "$p" = x ] && echo 7 || echo 8)
+  cat > "$TMP/proj-$p/compose.yaml" <<EOF
+services:
+  nginx:
+    image: $IMG
+    labels:
+      org.mi-kandra.role: origin
+      org.mi-kandra.project: $p
+      org.mi-kandra.origin-alias: $p-origin
+      org.mi-kandra.domains: selftest-$p.example.test
+      org.mi-kandra.edge-capable: "1"
+      org.mi-kandra.diag-http: "1809$dp"
+      org.mi-kandra.diag-https: "1849$dp"
+    ports:
+      - "\${MI_KANDRA_HTTP_PUBLISH:-0.0.0.0:80:80}"
+      - "\${MI_KANDRA_HTTPS_PUBLISH:-0.0.0.0:443:443}"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - $TMPN:/c:ro
+    networks:
+      mi-kandra-edge:
+        aliases: [$p-origin]
+# Même clé que les vrais projets : le label com.docker.compose.network doit
+# correspondre, quel que soit le projet qui crée le réseau en premier.
+networks:
+  mi-kandra-edge:
+    name: $NET
+EOF
+done
+start_fake() { # x|y — affiche le mode retenu
+  (
+    cd "$TMP/proj-$1" || exit 1
+    # Ce que project.env fixe dans un vrai projet : nom et ports de diagnostic propres.
+    dp=$([ "$1" = x ] && echo 7 || echo 8)
+    MI_KANDRA_PROJECT=$1 MI_KANDRA_DIAG_HTTP=1809$dp MI_KANDRA_DIAG_HTTPS=1849$dp MI_KANDRA_COMPOSE_PROJECT=s$1
+    MI_KANDRA_EDGE_PREF_FILE="$TMP/proj-$1/.mi-kandra-edge.pref"
+    export MI_KANDRA_PROJECT MI_KANDRA_DIAG_HTTP MI_KANDRA_DIAG_HTTPS MI_KANDRA_COMPOSE_PROJECT MI_KANDRA_EDGE_PREF_FILE
+    edge choose </dev/null >/dev/null 2>&1
+    eval "$(edge env 2>/dev/null)"
+    docker compose -p "s$1" -f "$(native "$TMP/proj-$1")/compose.yaml" up -d >/dev/null 2>&1
+    case "${MI_KANDRA_EDGE_MODE:-standalone}" in
+      shared) edge sync >/dev/null 2>&1 ;;
+      pending) [ "${MI_KANDRA_EDGE_AUTOADOPT:-0}" = "1" ] && edge adopt --yes >/dev/null 2>&1 ;;
+    esac
+    echo "${MI_KANDRA_EDGE_MODE:-standalone}"
+  )
+}
+pref_of() { sed -n 's/^MI_KANDRA_EDGE_PREF=//p' "$TMP/proj-$1/.mi-kandra-edge.pref" 2>/dev/null; }
+reset_fakes() {
+  docker rm -f sx-nginx-1 sy-nginx-1 >/dev/null 2>&1
+  docker compose -p mi-kandra-edge -f "$(native "$EDGE_DIR")/edge-compose.yml" down >/dev/null 2>&1
+  docker volume rm "$VOL" >/dev/null 2>&1
+  rm -f "$TMP/proj-x/.mi-kandra-edge.pref" "$TMP/proj-y/.mi-kandra-edge.pref"
+}
+
+echo "   -- x d'abord, puis y (choix « cohabiter » mémorisé chez y)"
+check "x seul : mode autonome" "$(start_fake x)" "standalone"
+wait_route selftest-x.example.test "x seul : public en direct"
+check "y sans choix ni terminal : reste local" "$(start_fake y)" "pending"
+check "y sans choix : pas public" "$(body selftest-y.example.test)" "origin-x"
+printf 'MI_KANDRA_EDGE_PREF=cohabit\n' > "$TMP/proj-y/.mi-kandra-edge.pref"
+check "y relancé avec « cohabiter » : x converti, y partagé" "$(start_fake y)" "shared"
+check "routeur démarré par la conversion" "$(wait_edge_healthy && echo healthy)" "healthy"
+wait_route selftest-x.example.test "x via le routeur"
+wait_route selftest-y.example.test "y via le routeur"
+check "x et y chacun chez soi" "$(body selftest-x.example.test)/$(body selftest-y.example.test)" "origin-x/origin-y"
+check "x converti : « cohabiter » mémorisé chez lui" "$(pref_of x)" "cohabit"
+check "x relancé : partagé, sans question" "$(start_fake x)" "shared"
+check "x et y toujours routés" "$(body selftest-x.example.test)/$(body selftest-y.example.test)" "origin-x/origin-y"
+
+reset_fakes
+echo "   -- y d'abord, puis x (MI_KANDRA_EDGE_AUTOADOPT=1, sans choix mémorisé)"
+check "y seul : mode autonome" "$(start_fake y)" "standalone"
+wait_route selftest-y.example.test "y seul : public en direct"
+check "x avec AUTOADOPT : démarre en local puis convertit y" "$(MI_KANDRA_EDGE_AUTOADOPT=1 start_fake x)" "pending"
+check "routeur démarré par la conversion" "$(wait_edge_healthy && echo healthy)" "healthy"
+wait_route selftest-x.example.test "x via le routeur"
+wait_route selftest-y.example.test "y via le routeur"
+check "x et y chacun chez soi" "$(body selftest-x.example.test)/$(body selftest-y.example.test)" "origin-x/origin-y"
+check "« cohabiter » mémorisé chez x et chez y" "$(pref_of x)/$(pref_of y)" "cohabit/cohabit"
+check "y relancé : partagé, sans question" "$(start_fake y)" "shared"
+reset_fakes
+
+echo "== 8) Le routeur ne démarre pas pendant la conversion : retour arrière"
+# Un ancien conteneur arrêté garde le nom mi-kandra-edge : `docker compose up` du
+# routeur échoue après la conversion de x. x doit reprendre 80/443 seul.
+check "x seul : mode autonome" "$(start_fake x)" "standalone"
+wait_route selftest-x.example.test "x seul : public en direct"
+docker create --name mi-kandra-edge "$IMG" >/dev/null 2>&1
+printf 'MI_KANDRA_EDGE_PREF=cohabit\n' > "$TMP/proj-y/.mi-kandra-edge.pref"
+check "y : conversion échouée, reste local" "$(start_fake y)" "pending"
+wait_route selftest-x.example.test "x a repris 80/443"
+check "x publie de nouveau 80/443" "$(docker port sx-nginx-1 443/tcp 2>/dev/null | grep -c '^0\.0\.0\.0:443$')" "1"
+check "x : choix « cohabiter » posé par la conversion retiré" "$(pref_of x)" ""
+check "y : choix « cohabiter » conservé" "$(pref_of y)" "cohabit"
+docker rm -f mi-kandra-edge >/dev/null 2>&1
+check "obstacle levé, y relancé : x converti, y partagé" "$(start_fake y)" "shared"
+wait_route selftest-x.example.test "x via le routeur"
+wait_route selftest-y.example.test "y via le routeur"
+reset_fakes
+
+echo "== 9) Port fixe de l'hôte (check-port, ex. acme-dns sur 53/udp)"
+# Port de test plutôt que 53 : sur le poste de développement, 53 peut déjà servir.
+TP=15353
+check "port libre : code 0" "$(edge check-port $TP udp >/dev/null 2>&1; echo $?)" "0"
+docker run -d --name selftest-p53 -p "127.0.0.1:$TP:53/udp" -l com.docker.compose.project=autreprojet "$IMG" >/dev/null 2>&1
+wait_running selftest-p53
+out=$(edge check-port $TP udp 2>&1); rc=$?
+check "tenu par un autre projet : code 1" "$rc" "1"
+check "le détenteur est nommé" "$(printf '%s\n' "$out" | grep -c "selftest-p53 (projet autreprojet)")" "1"
+check "tenu par ce projet : code 0" "$(MI_KANDRA_COMPOSE_PROJECT=autreprojet edge check-port $TP udp >/dev/null 2>&1; echo $?)" "0"
+check "même numéro en tcp : libre" "$(edge check-port $TP tcp >/dev/null 2>&1; echo $?)" "0"
+check "argument invalide : code 64" "$(edge check-port abc >/dev/null 2>&1; echo $?)" "64"
+docker rm -f selftest-p53 >/dev/null 2>&1
 
 echo
 echo "Résultat : $PASS OK, $FAILN FAIL"

@@ -88,18 +88,29 @@ case "$cmd" in
     enc() { # filtre : chiffre si une phrase de passe est définie
       if [ -n "${MI_KANDRA_BACKUP_PASSPHRASE:-}" ]; then openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:MI_KANDRA_BACKUP_PASSPHRASE; else cat; fi
     }
+    # dump_to FICHIER commande... : « commande | enc > FICHIER », en échec si la
+    # commande OU le chiffrement échoue. sh n'a pas de pipefail : sans ce relais,
+    # un tar/pg_dump en échec passait pour réussi dès que le chiffrement écrivait
+    # son en-tête (fichier non vide).
+    dump_to() {
+      dt_out=$1; shift
+      dt_st=$(mktemp) || return 1
+      { "$@" 2>/dev/null; echo $? > "$dt_st"; } | enc > "$dt_out"; dt_enc=$?
+      dt_src=$(cat "$dt_st" 2>/dev/null); rm -f "$dt_st"
+      [ "${dt_src:-1}" -eq 0 ] && [ "$dt_enc" -eq 0 ] && [ -s "$dt_out" ]
+    }
     sfx=""; [ -n "${MI_KANDRA_BACKUP_PASSPHRASE:-}" ] && sfx=".enc"
     [ -z "$sfx" ] || command -v openssl >/dev/null 2>&1 || die "openssl requis pour le chiffrement"
     for n in $(volumes); do
       out="$dir/$n-$ts.tgz$sfx"
-      if docker run --rm -v "$n":/v:ro alpine tar czf - -C /v . 2>/dev/null | enc > "$out" && [ -s "$out" ]; then
+      if dump_to "$out" docker run --rm -v "$n":/v:ro alpine tar czf - -C /v .; then
         chmod 600 "$out" 2>/dev/null || true; say "OK    volume $n -> $(basename "$out") ($(du -h "$out" | cut -f1))"; ok=$((ok + 1))
       else rm -f "$out"; say "FAIL  volume $n"; ko=$((ko + 1)); fi
     done
     pg=$(pg_container)
     if [ -n "$pg" ]; then
       out="$dir/$PROJ_COMPOSE-postgres-$ts.dump$sfx"
-      if docker exec "$pg" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' 2>/dev/null | enc > "$out" && [ -s "$out" ]; then
+      if dump_to "$out" docker exec "$pg" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'; then
         chmod 600 "$out" 2>/dev/null || true; say "OK    base  $pg -> $(basename "$out") ($(du -h "$out" | cut -f1))"; ok=$((ok + 1))
       else rm -f "$out"; say "FAIL  base $pg (pg_dump)"; ko=$((ko + 1)); fi
     else say "INFO  pas de PostgreSQL local en marche : base non sauvegardée ici (base externe : utilisez les sauvegardes du fournisseur)"; fi

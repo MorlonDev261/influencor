@@ -11,6 +11,10 @@
 # Détection : chaque nginx "origin" porte des labels Docker (org.mi-kandra.*) qui
 # le décrivent (projet, alias réseau, domaines, ports de diagnostic). Le
 # script lit ces labels : aucun fichier de configuration central à tenir à jour.
+# Facultatif : org.mi-kandra.domains-file désigne un fichier DANS l'origin listant
+# des domaines supplémentaires (un par ligne), relu à chaque sync/register. Liste
+# vide sans label de domaines = routes du projet retirées ; fichier illisible =
+# routes conservées.
 #
 # Commandes :
 #   env           Affiche les `export` à injecter avant `docker compose`
@@ -30,6 +34,10 @@
 #   doctor        Diagnostic complet (code retour ≠ 0 si anomalie).
 #                 --probe : sonde HTTPS réelle de chaque domaine + expiration du
 #                 certificat (à lancer sur le serveur).
+#   check-port P [tcp|udp]
+#                 Qui tient le port P de l'hôte ? Code 0 = libre ou tenu par ce projet,
+#                 1 = tenu par le conteneur d'un autre projet, 2 = tenu hors Docker.
+#                 À appeler avant un service à port fixe (acme-dns : 53/udp).
 #
 # Modes : standalone (aucun voisin) · shared (routeur actif) · pending
 # (80/443 pris par un voisin non encore converti → lancer `adopt`) · isolated (choix « autonome »
@@ -71,6 +79,8 @@ is_project() { printf '%s' "$1" | grep -Eq '^[a-z0-9][a-z0-9-]{0,31}$'; }
 is_alias()   { printf '%s' "$1" | grep -Eq '^[a-z0-9][a-z0-9-]{0,62}$'; }
 is_domain()  { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'; }
 is_port()    { printf '%s' "$1" | grep -Eq '^[0-9]{2,5}$'; }
+# Domaine validé (lettres, chiffres, tirets, points) → motif grep littéral.
+regex_escape() { printf '%s' "$1" | sed 's/\./\\./g'; }
 
 # ── Docker ───────────────────────────────────────────────────────────────────
 docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
@@ -124,18 +134,47 @@ ensure_network() {
 }
 
 label() { docker inspect -f "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null; }
+# Label présent, même vide (label() ne distingue pas « vide » de « absent »).
+has_label() { docker inspect -f '{{json .Config.Labels}}' "$1" 2>/dev/null | grep -q "\"$2\":"; }
 
-# Domaines d'un origin. Label org.mi-kandra.domains-file = fichier DANS le conteneur
-# (un domaine par ligne, # = commentaire) : la liste change à chaud, sans recréer le
-# conteneur. Fichier présent mais vide = plus aucun domaine. Sans ce label, ou fichier
-# illisible : label org.mi-kandra.domains, comme avant.
+# Domaines d'un origin : label org.mi-kandra.domains + fichier facultatif désigné
+# par org.mi-kandra.domains-file (premier mot de chaque ligne, # = commentaire).
+# Le fichier AJOUTE des domaines au label, il ne le remplace pas : Pôma y liste
+# ses seuls domaines supplémentaires (« domaine état »), Influencor, sans label,
+# tous les siens. Le fichier vit DANS le conteneur origin : un projet peut ainsi
+# ajouter/retirer des domaines à chaud, sans recréer son nginx pour changer un
+# label. Entrée non fiable : chemin et domaines sont validés, une ligne invalide
+# est ignorée (elle ne doit pas priver le domaine principal de sa route).
+#
+# Code retour : 0 = liste complète (fichier lu, ou absent = aucun domaine en
+# plus) ; 2 = fichier illisible (conteneur arrêté, droits…) : la liste affichée
+# n'a que le label, l'appelant ne doit pas s'en servir pour retirer des routes.
 origin_domains() {
-  od_file=$(label "$1" org.mi-kandra.domains-file)
-  if [ -n "$od_file" ] && od_txt=$(docker exec "$1" cat "$od_file" 2>/dev/null); then
-    printf '%s\n' "$od_txt" | sed 's/#.*//' | tr -s ' \t\r\n' '    ' | sed 's/^ //;s/ $//'
-    return 0
+  od_ctr=$1; od_rc=0
+  od_list=$(label "$od_ctr" org.mi-kandra.domains)
+  od_file=$(label "$od_ctr" org.mi-kandra.domains-file)
+  if [ -n "$od_file" ]; then
+    if printf '%s' "$od_file" | grep -Eq '^/[A-Za-z0-9._/-]+$' && ! printf '%s' "$od_file" | grep -q '\.\.'; then
+      # 3 = fichier absent (aucun domaine supplémentaire), à distinguer d'un
+      # échec de docker exec ou de cat.
+      od_txt=$(docker exec "$od_ctr" sh -c '[ -e "$1" ] || exit 3; cat "$1"' sh "$od_file" 2>/dev/null)
+      case $? in
+        0)
+          for od_d in $(printf '%s\n' "$od_txt" | sed 's/#.*//' | awk 'NF {print $1}'); do
+            if is_domain "$od_d"; then od_list="$od_list $od_d"
+            else warn "$(label "$od_ctr" org.mi-kandra.project) : domaine invalide '$od_d' ignoré ($od_file)"; fi
+          done ;;
+        3) ;;
+        *)
+          od_rc=2
+          warn "$(label "$od_ctr" org.mi-kandra.project) : $od_file illisible dans $od_ctr" ;;
+      esac
+    else
+      warn "$(label "$od_ctr" org.mi-kandra.project) : chemin org.mi-kandra.domains-file invalide ignoré"
+    fi
   fi
-  label "$1" org.mi-kandra.domains
+  printf '%s' "$od_list" | sed 's/^ *//'
+  return $od_rc
 }
 
 # nginx >= 1.27.3 : le paramètre `resolve` des upstreams (résolution DNS dynamique)
@@ -244,12 +283,33 @@ cmd_choose() {
     --reset)  rm -f "$PREF_FILE" ;;
   esac
   docker_ok || return 0
-  cur=$(pref_get)
-  [ -z "$cur" ] || return 0
+  # ASK=0 : commande annexe (logs, statut…), ni question ni conversion.
   [ "${MI_KANDRA_EDGE_ASK:-1}" != "0" ] || return 0
+  cur=$(pref_get)
+  # « Cohabiter » déjà choisi : un voisin qui tient 80/443 sans routeur (premier
+  # voisin, ou routeur supprimé) est converti sans reposer la question. Sans ce
+  # passage, le projet resterait en loopback (mode pending) malgré le choix.
+  if [ "$cur" = "cohabit" ]; then
+    if ! edge_running && [ -n "$(foreign_port_holders)" ]; then
+      say "Choix mémorisé : cohabiter. Un voisin occupe 80/443 sans routeur : conversion …"
+      cmd_adopt --yes || warn "Conversion impossible : ce projet démarre en local. Corrigez ci-dessus, puis  sh scripts/edge/mi-kandra-edge.sh adopt --pull --yes"
+    fi
+    return 0
+  fi
+  [ -z "$cur" ] || return 0
   nb=$(neighbours_list)
   if [ -z "$nb" ] && ! external_port_holder; then return 0; fi     # personne d'autre : rien à demander
-  { [ -t 0 ] && [ -t 1 ]; } || { say "Autres applications détectées mais terminal non interactif : choix reporté (sh scripts/edge/mi-kandra-edge.sh choose)."; return 0; }
+  if ! { [ -t 0 ] && [ -t 1 ]; }; then
+    # Sans terminal, rien n'est converti sans accord (la conversion coupe les
+    # voisins quelques secondes) : si 80/443 sont pris, ce projet reste local.
+    warn "D'autres applications sont sur ce serveur et aucun terminal ne permet de demander comment cohabiter."
+    if ! edge_running && { [ -n "$(foreign_port_holders)" ] || external_port_holder; }; then
+      warn "80/443 sont pris : ce projet ne sera PAS public. Pour cohabiter sans question :"
+      warn "  MI_KANDRA_EDGE_AUTOADOPT=1 ./start.sh   (ou une fois : sh scripts/edge/mi-kandra-edge.sh adopt --yes)"
+    fi
+    warn "Pour mémoriser le choix : sh scripts/edge/mi-kandra-edge.sh choose (dans un terminal)."
+    return 0
+  fi
 
   printf '\n' >&2
   say "D'autres applications sont déjà installées sur ce serveur :"
@@ -305,7 +365,8 @@ write_routes() {
     is_domain "$d" || { fail "$w_project : domaine invalide '$d' ignoré"; return 1; }
     # `.exemple.com` = le domaine ET tous ses sous-domaines (option hostnames).
     key=".$d"
-    owner=$(edge_exec "grep -l '^$key ' $EDGE_ROUTES/*.tls.map 2>/dev/null" | head -1)
+    # Points échappés : dans une regex, « a.b.com » reconnaîtrait aussi « axb.com ».
+    owner=$(edge_exec "grep -l '^$(regex_escape "$key") ' $EDGE_ROUTES/*.tls.map 2>/dev/null" | head -1)
     if [ -n "$owner" ] && [ "$owner" != "$EDGE_ROUTES/$w_project.tls.map" ]; then
       fail "$w_project : le domaine $d est déjà routé par $(basename "$owner" .tls.map) — refusé."
       return 1
@@ -352,17 +413,30 @@ register_origin() {
   r_ctr=$1
   r_project=$(label "$r_ctr" org.mi-kandra.project)
   r_alias=$(label "$r_ctr" org.mi-kandra.origin-alias)
-  r_domains=$(origin_domains "$r_ctr")
+  r_domains=$(origin_domains "$r_ctr"); r_od=$?
+  is_project "$r_project" || { fail "nom de projet invalide : '$r_project'"; return 1; }
+  r_routed=0
+  edge_exec "[ -f $EDGE_ROUTES/$r_project.tls.map ]" </dev/null && r_routed=1
+  # Fichier de domaines illisible : la liste n'aurait que le label. Réécrire les
+  # routes retirerait les domaines du fichier (ou toutes les routes d'un projet
+  # sans label) sur une simple erreur passagère : on garde celles en place.
+  if [ "$r_od" -eq 2 ] && [ "$r_routed" -eq 1 ]; then
+    warn "$r_project : routes actuelles conservées (liste de domaines illisible)"
+    return 0
+  fi
+  # Liste lue et vide, sans label de domaines : le projet n'a plus (ou pas
+  # encore) de domaine, ses routes sont retirées. Un label présent mais vide
+  # (variable .env manquante) reste une erreur, signalée par write_routes.
+  if [ -z "$r_domains" ] && [ -n "$(label "$r_ctr" org.mi-kandra.domains-file)" ] \
+     && ! has_label "$r_ctr" org.mi-kandra.domains; then
+    if [ "$r_od" -eq 2 ]; then warn "$r_project : liste de domaines illisible, aucune route"; return 0; fi
+    [ "$r_routed" -eq 1 ] || { ok "$r_project : aucun domaine, aucune route"; return 0; }
+    cmd_unregister "$r_project"; return $?
+  fi
   # Filet de sécurité si la stack n'a pas (encore) rejoint le réseau partagé.
   if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$r_ctr" 2>/dev/null | grep -q "\"$EDGE_NET\""; then
     is_alias "$r_alias" && docker network connect --alias "$r_alias" "$EDGE_NET" "$r_ctr" >/dev/null 2>&1 \
       && ok "$r_project : $r_ctr rattaché au réseau $EDGE_NET"
-  fi
-  # Liste vivante vidée (dernier domaine retiré) : on retire les routes au lieu d'échouer.
-  if [ -z "$r_domains" ] && [ -n "$(label "$r_ctr" org.mi-kandra.domains-file)" ]; then
-    is_project "$r_project" || { fail "nom de projet invalide : '$r_project'"; return 1; }
-    edge_exec "[ -f $EDGE_ROUTES/$r_project.tls.map ]" || { ok "$r_project : aucun domaine, aucune route"; return 0; }
-    cmd_unregister "$r_project"; return $?
   fi
   write_routes "$r_project" "$r_alias" "$r_domains"
 }
@@ -462,6 +536,31 @@ update_neighbor() {
 # adopt [--yes] [--pull]
 #   --yes   confirme la conversion (recrée le nginx de chaque projet listé : coupure de quelques secondes)
 #   --pull  met d'abord à jour (git pull + recréation de nginx) les voisins trop anciens pour être convertis
+# Retour arrière d'une conversion inachevée : les voisins listés (« projet|dossier|
+# fichiers|service|pref créée », une ligne chacun) republient 80/443 comme avant,
+# et le choix « cohabiter » posé pour eux par cette conversion est retiré. Un
+# routeur démarré mais malade est d'abord arrêté : il tiendrait encore les ports.
+adopt_rollback() {
+  [ -n "$1" ] || return 0
+  warn "Retour arrière : les projets convertis reprennent 80/443."
+  if edge_running && ! edge_healthy; then
+    docker stop "$EDGE_NAME" >/dev/null 2>&1 && warn "routeur $EDGE_NAME (malade) arrêté"
+  fi
+  printf '%s' "$1" | while IFS='|' read -r rb_proj rb_wd rb_cfg rb_svc rb_pref; do
+    [ -n "$rb_proj" ] || continue
+    set --
+    rb_ifs=$IFS; IFS=','; for f in $rb_cfg; do set -- "$@" -f "$f"; done; IFS=$rb_ifs
+    # </dev/null : docker compose ne doit pas lire les lignes suivantes de la boucle.
+    if ( cd "$rb_wd" && unset MI_KANDRA_HTTP_PUBLISH MI_KANDRA_HTTPS_PUBLISH \
+         && docker compose -p "$rb_proj" "$@" up -d --no-deps --force-recreate "$rb_svc" >&2 </dev/null ); then
+      ok "$rb_proj : 80/443 rétablis"
+    else
+      fail "$rb_proj : retour arrière impossible — relancez sa stack : cd '$rb_wd' && ./start.sh"
+    fi
+    [ "$rb_pref" = "1" ] && rm -f "$rb_wd/.mi-kandra-edge.pref"
+  done
+}
+
 cmd_adopt() {
   assume=""; pull=0
   for a in "$@"; do
@@ -503,7 +602,6 @@ cmd_adopt() {
     fail "non convertibles automatiquement (pas de label org.mi-kandra.edge-capable=1) :$bad"
     for n in $bad; do
       wd=$(label "$n" com.docker.compose.project.working_dir)
-      pj=$(label "$n" com.docker.compose.project); sv=$(label "$n" com.docker.compose.service)
       say "  • $n — ancienne version, créée avant les labels Mi Kandra."
       [ -z "$wd" ] || say "      dossier : $wd"
     done
@@ -524,6 +622,10 @@ cmd_adopt() {
   fi
 
   ensure_network || { fail "création du réseau $EDGE_NET impossible"; return 1; }
+  # Voisins déjà convertis (« projet|dossier|fichiers|service|pref créée ») : en cas
+  # d'échec, adopt_rollback leur rend 80/443 au lieu de laisser le serveur sans
+  # personne pour répondre.
+  converted=""
   for n in $(echo "$holders" | cut -d'|' -f1); do
     proj=$(label "$n" com.docker.compose.project)
     wd=$(label "$n" com.docker.compose.project.working_dir)
@@ -531,18 +633,33 @@ cmd_adopt() {
     svc=$(label "$n" com.docker.compose.service)
     dh=$(label "$n" org.mi-kandra.diag-http); dhs=$(label "$n" org.mi-kandra.diag-https)
     is_port "$dh" && is_port "$dhs" && [ -n "$proj" ] && [ -n "$wd" ] && [ -n "$cfg" ] && [ -n "$svc" ] \
-      || { fail "$n : labels de conversion incomplets"; return 1; }
+      || { fail "$n : labels de conversion incomplets"; adopt_rollback "$converted"; return 1; }
     # Paramètres positionnels (et non une chaîne) : les chemins peuvent contenir
     # des espaces (ex. "Mi Kandra").
     set --
     old_ifs=$IFS; IFS=','; for f in $cfg; do set -- "$@" -f "$f"; done; IFS=$old_ifs
     say "Conversion de $n ($proj/$svc) …"
-    ( cd "$wd" \
+    if ! ( cd "$wd" \
       && MI_KANDRA_HTTP_PUBLISH="127.0.0.1:$dh:80" MI_KANDRA_HTTPS_PUBLISH="127.0.0.1:$dhs:443" \
-         docker compose -p "$proj" "$@" up -d --no-deps --force-recreate "$svc" >&2 ) \
-      || { fail "$n : conversion impossible (80/443 peuvent rester indisponibles — relancez la stack du projet)"; return 1; }
+         docker compose -p "$proj" "$@" up -d --no-deps --force-recreate "$svc" >&2 ); then
+      fail "$n : conversion impossible"
+      # Lui aussi : son conteneur a pu être supprimé sans être recréé.
+      adopt_rollback "$converted$proj|$wd|$cfg|$svc|0
+"
+      return 1
+    fi
+    # Le voisin converti cohabite désormais : son prochain ./start.sh ne doit pas
+    # reposer la question. Un choix déjà mémorisé chez lui n'est pas touché.
+    pc=0
+    if [ ! -e "$wd/.mi-kandra-edge.pref" ]; then
+      if { printf 'MI_KANDRA_EDGE_PREF=cohabit\n' > "$wd/.mi-kandra-edge.pref" && chmod 600 "$wd/.mi-kandra-edge.pref"; } 2>/dev/null; then pc=1
+      else warn "$n : choix « cohabiter » non mémorisé dans $wd (la question lui sera reposée)"; fi
+    fi
+    converted="$converted$proj|$wd|$cfg|$svc|$pc
+"
   done
-  cmd_ensure_edge || return 1
+  cmd_ensure_edge || { adopt_rollback "$converted"; return 1; }
+  [ -n "$(pref_get)" ] || pref_set cohabit
   sleep 2
   cmd_sync
 }
@@ -617,7 +734,7 @@ cmd_doctor() {
       case "$st" in healthy|running) ok "$p : origin $st";; *) fail "$p : origin $st"; rc=1;; esac
       for dom in $d; do
         dom=${dom#\*.}; dom=${dom#.}
-        if edge_exec "grep -q '^\.$dom ' $EDGE_ROUTES/$p.tls.map 2>/dev/null"; then ok "$p : route $dom présente"
+        if edge_exec "grep -q '^$(regex_escape ".$dom") ' $EDGE_ROUTES/$p.tls.map 2>/dev/null"; then ok "$p : route $dom présente"
         else fail "$p : route $dom absente → sh scripts/edge/mi-kandra-edge.sh sync"; rc=1; fi
       done
       docker exec "$EDGE_NAME" getent hosts "$a" >/dev/null 2>&1 \
@@ -647,6 +764,40 @@ cmd_doctor() {
   return $rc
 }
 
+# ── Ports fixes de l'hôte ────────────────────────────────────────────────────
+# Certains services publient un port qu'on ne peut pas déplacer (acme-dns : 53,
+# imposé par la délégation DNS). Deux projets qui l'activent sur le même serveur
+# se le disputent : le second échoue au démarrage, sans dire pourquoi. Ce
+# contrôle nomme le détenteur avant que le projet ne lance son service.
+cmd_check_port() {
+  cp_port=${1:-}; cp_proto=${2:-tcp}
+  printf '%s' "$cp_port" | grep -Eq '^[0-9]{1,5}$' || { fail "usage : check-port <port> [tcp|udp]"; return 64; }
+  case "$cp_proto" in tcp|udp) ;; *) fail "usage : check-port <port> [tcp|udp]"; return 64 ;; esac
+  docker_ok || return 0
+  # « 0.0.0.0:53->53/udp, [::]:53->53/udp » : seul le port côté hôte compte.
+  cp_holders=$(docker ps --format '{{.Names}}|{{.Label "com.docker.compose.project"}}|{{.Ports}}' 2>/dev/null \
+    | awk -F'|' -v re=":$cp_port->[0-9]+/$cp_proto" '$3 ~ re { print $1 "|" $2 }')
+  if [ -n "$cp_holders" ]; then
+    cp_foreign=$(printf '%s\n' "$cp_holders" | awk -F'|' -v me="${MI_KANDRA_COMPOSE_PROJECT:-}" 'me == "" || $2 != me')
+    [ -n "$cp_foreign" ] || return 0
+    printf '%s\n' "$cp_foreign" | while IFS='|' read -r cp_n cp_p; do
+      fail "port $cp_port/$cp_proto déjà tenu par le conteneur $cp_n (projet ${cp_p:-inconnu})"
+    done
+    return 1
+  fi
+  # Hors Docker (systemd-resolved, dnsmasq…). Pas avant : le docker-proxy d'un
+  # conteneur apparaîtrait ici aussi.
+  if command -v ss >/dev/null 2>&1; then
+    cp_flag=t; [ "$cp_proto" = udp ] && cp_flag=u
+    cp_addr=$(ss -ln"$cp_flag" 2>/dev/null | awk -v p=":$cp_port" 'substr($4, length($4) - length(p) + 1) == p { print $4 }' | sort -u | tr '\n' ' ')
+    if [ -n "$cp_addr" ]; then
+      warn "port $cp_port/$cp_proto déjà ouvert hors Docker sur : $cp_addr(ex. stub DNS de systemd-resolved)"
+      return 2
+    fi
+  fi
+  return 0
+}
+
 # ── Point d'entrée ───────────────────────────────────────────────────────────
 cmd=${1:-status}
 [ $# -gt 0 ] && shift
@@ -660,5 +811,7 @@ case "$cmd" in
   adopt)       cmd_adopt "$@" ;;
   choose)      cmd_choose "$@" ;;
   doctor)      cmd_doctor "$@" ;;
-  *) sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+  check-port)  cmd_check_port "$@" ;;
+  # Aide : tout l'en-tête, jusqu'à la ligne de « = » qui le ferme.
+  *) awk 'NR > 2 && /^# =+$/ { exit } NR > 2' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
 esac

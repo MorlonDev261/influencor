@@ -14,6 +14,8 @@
 #   --tail <n>      nombre de lignes d'historique (défaut : 200)
 #   --no-follow     affiche l'historique puis rend la main
 #   --health        garde les sondes /api/health (et /healthz, masquées par défaut)
+#   --scans         montre aussi le trafic hors-site (Host inconnu, accès direct
+#                   par l'IP, domaines d'autres projets), masqué par défaut
 #   --utc           heures en UTC au lieu de l'heure locale du serveur
 #   --raw           sortie brute de `docker compose logs`
 #
@@ -40,6 +42,7 @@ since=""
 minlevel=0
 grep_text=""
 health=0
+scans=0
 utc=0
 raw=0
 
@@ -57,6 +60,7 @@ while [ "$#" -gt 0 ]; do
       tail_n="$2"; shift 2 ;;
     --no-follow) follow=0; shift ;;
     --health) health=1; shift ;;
+    --scans) scans=1; shift ;;
     --utc) utc=1; shift ;;
     --raw) raw=1; shift ;;
     -*) die "option inconnue : $1" ;;
@@ -109,6 +113,7 @@ if [ "$color" -eq 1 ]; then
   [ "$minlevel" -eq 2 ] && filter=" · erreurs seulement"
   [ "$minlevel" -eq 1 ] && filter=" · avertissements et erreurs"
   [ -n "$grep_text" ] && filter="$filter · « $grep_text »"
+  [ "$scans" -eq 1 ] && filter="$filter · avec le hors-site"
   tz_label="heure locale"; [ "$utc" -eq 1 ] && tz_label="UTC"
   printf '\033[1m\033[38;2;212;147;6m%s\033[0m \033[1mlogs\033[0m \033[90m· %s%s · %s' "$title" "$scope" "$filter" "$tz_label"
   [ "$follow" -eq 1 ] && printf ' · Ctrl+C pour quitter'
@@ -146,9 +151,11 @@ sort_by_time() {
 {
   "${compose[@]}" logs --no-color --timestamps "${history_args[@]}" \
       ${services[@]+"${services[@]}"} 2>&1 | sort_by_time
+  # Repère lu par logs-pretty.awk : bilan du trafic hors-site masqué.
+  echo "mk-history-end"
   if [ "$follow" -eq 1 ]; then
     "${compose[@]}" logs --no-color --timestamps -f --since "$t0" \
         ${services[@]+"${services[@]}"} 2>&1
   fi
 } | "${awk_cmd[@]}" -v color="$color" -v tzoff="$tzoff" -v minlevel="$minlevel" \
-      -v grep="$grep_text" -v health="$health" -v prefix="${LOGS_PREFIX:-}" -f "$AWK_SCRIPT"
+      -v grep="$grep_text" -v health="$health" -v scans="$scans" -v prefix="${LOGS_PREFIX:-}" -f "$AWK_SCRIPT"

@@ -17,9 +17,13 @@ services:
       org.mi-kandra.edge.version: "1"
     # Pas de docker-entrypoint (pas d'envsubst) : la config est statique.
     entrypoint: ["nginx", "-g", "daemon off;"]
+    # IPv4 uniquement : le réseau mi-kandra-edge n'a pas d'IPv6, donc une
+    # publication sur [::] passe par docker-proxy, qui remplace l'IP du client
+    # par la passerelle du réseau (envoyée telle quelle en PROXY protocol) et
+    # contourne la chaîne DOCKER-USER. Cloudflare joint l'origine en IPv4.
     ports:
-      - "80:80"
-      - "443:443"
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
     volumes:
       - ./edge-nginx.conf:/etc/nginx/nginx.conf:ro
       - mi-kandra-edge-routes:/etc/mi-kandra-edge/routes.d

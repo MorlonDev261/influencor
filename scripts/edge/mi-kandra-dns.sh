@@ -170,14 +170,16 @@ holders_443() {
 }
 
 cmd_probe() {
-  pr_dom=$(printf '%s' "${1:-}" | tr -d ' \r' | tr '[:upper:]' '[:lower:]'); shift
+  # `shift` gardé : sous dash, un shift sans argument restant fait QUITTER le
+  # script (et `probe` sans domaine doit répondre « indéterminé », code 2).
+  pr_dom=$(printf '%s' "${1:-}" | tr -d ' \r' | tr '[:upper:]' '[:lower:]'); [ "$#" -gt 0 ] && shift
   pr_path=/api/health; pr_expect=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --path) pr_path=${2:-/api/health}; shift 2 ;;
-      --expect) pr_expect=${2:-}; shift 2 ;;
-      *) shift ;;
+      --path) pr_path=${2:-/api/health}; [ "$#" -ge 2 ] && shift ;;
+      --expect) pr_expect=${2:-}; [ "$#" -ge 2 ] && shift ;;
     esac
+    shift
   done
   pr_dom=${pr_dom#http://}; pr_dom=${pr_dom#https://}; pr_dom=${pr_dom%%/*}
   case "$pr_dom" in ''|localhost|*[!a-z0-9.-]*) return 2 ;; esac

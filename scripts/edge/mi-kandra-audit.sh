@@ -114,7 +114,7 @@ rm -f "$LIST"
 # ── 5, 6, 7. Docker ──────────────────────────────────────────────────────────
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   hdr "Docker : ports publiés"
-  bad=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' '$2 ~ /(0\.0\.0\.0|\[::\]):(5432|5433|5434|6379|9000|9001|3000|4000|4300|3100|9090|8080|11434)->/ {print $1" -> "$2}')
+  bad=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' '$2 ~ /(0\.0\.0\.0|\[::\]):(5432|5433|5434|6379|9000|9001|3000|4000|4300|3100|3110|9090|8080|11434)->/ {print $1" -> "$2}')
   [ -z "$bad" ] && ok "aucun service interne publié sur toutes les interfaces" \
     || printf '%s\n' "$bad" | while IFS= read -r l; do printf 'FAIL  exposé publiquement : %s\n' "$l"; done
   [ -n "$bad" ] && FAILS=$((FAILS + 1))
@@ -125,7 +125,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   hdr "Docker : secrets faibles dans les conteneurs en marche"
   weak=0
   for c in $(docker ps --format '{{.Names}}' | grep -v '^mi-kandra-edge$'); do
-    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" 2>/dev/null | grep -E '^[A-Za-z_]*(PASSWORD|SECRET|SECRET_KEY|ACCESS_KEY)[A-Za-z_]*=' | while IFS= read -r kv; do
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" 2>/dev/null | grep -E '^[A-Za-z0-9_]*(PASSWORD|SECRET|SECRET_KEY|ACCESS_KEY)[A-Za-z0-9_]*=' | while IFS= read -r kv; do
       k=${kv%%=*}; v=${kv#*=}
       is_public_key "$k" && continue
       case "$v" in
