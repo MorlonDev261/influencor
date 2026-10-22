@@ -13,15 +13,33 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 0
 
-# ── Couleurs (256 couleurs, dégradé cyan → bleu) ─────────────────────────────
+# ── Couleurs : bleus du logo (lib/app/theme/app_colors.dart : #204DA0, #3B6FD6, #4C86E5) ──
+# RVB exact (24 bits) ; console Linux ou terminal minimal : approximation 256 couleurs.
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   E=$(printf '\033')
   R="$E[0m"; BOLD="$E[1m"
-  C_BORDER="$E[38;5;32m"; C_RULE="$E[38;5;25m"; C_SUB="$E[1;38;5;75m"
-  C_TITLE="$E[38;5;153m"; C_VER="$E[1;38;5;45m"; C_HEAD="$E[1;38;5;111m"
-  C_DOT="$E[38;5;39m"; C_LABEL="$E[38;5;110m"; C_VAL="$E[1;38;5;255m"
-  G1="$E[1;38;5;123m"; G2="$E[1;38;5;87m"; G3="$E[1;38;5;81m"
-  G4="$E[1;38;5;75m"; G5="$E[1;38;5;39m"; G6="$E[1;38;5;33m"
+  case "${TERM:-}" in
+    linux|vt*|ansi|cons25)
+      rgb() { printf '%s[%s38;5;%sm' "$E" "$1" "$5"; } ;;
+    *)
+      rgb() { printf '%s[%s38;2;%s;%s;%sm' "$E" "$1" "$2" "$3" "$4"; } ;;
+  esac
+  #                  gras  R   G   B  256
+  C_BORDER=$(rgb ""   32  77 160  25)    # #204DA0 — bleu du logo
+  C_RULE=$(rgb   ""   32  77 160  25)
+  C_SUB=$(rgb    "1;" 76 134 229  68)    # #4C86E5
+  C_TITLE="$BOLD"
+  C_VER=$(rgb    "1;" 76 134 229  68)
+  C_HEAD=$(rgb   "1;" 76 134 229  68)
+  C_DOT=$(rgb    ""   59 111 214  26)    # #3B6FD6
+  C_LABEL=$(rgb  ""   76 134 229  68)
+  C_VAL="$BOLD"
+  G1=$(rgb "1;" 110 156 235  75)          # logo : dégradé #6E9CEB → #204DA0
+  G2=$(rgb "1;"  76 134 229  68)
+  G3=$(rgb "1;"  59 111 214  26)
+  G4=$(rgb "1;"  47  95 192  26)
+  G5=$(rgb "1;"  40  86 176  25)
+  G6=$(rgb "1;"  32  77 160  25)
 else
   R=""; BOLD=""; C_BORDER=""; C_RULE=""; C_SUB=""; C_TITLE=""; C_VER=""; C_HEAD=""
   C_DOT=""; C_LABEL=""; C_VAL=""; G1=""; G2=""; G3=""; G4=""; G5=""; G6=""
