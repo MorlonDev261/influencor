@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>NSPrivacyTracking</key>
+		<false/>
+		<key>NSPrivacyTrackingDomains</key>
+		<array/>
+		<!-- What the app itself sends: the push token, registered for the
+		     signed-in reseller (POST /api/push/native). The library stays on the
+		     device; the AI assistant talks to the provider the user configured
+		     with their own key. Keep in sync with App Store Connect > App
+		     Privacy. -->
+		<key>NSPrivacyCollectedDataTypes</key>
+		<array>
+			<dict>
+				<key>NSPrivacyCollectedDataType</key>
+				<string>NSPrivacyCollectedDataTypeDeviceID</string>
+				<key>NSPrivacyCollectedDataTypeLinked</key>
+				<true/>
+				<key>NSPrivacyCollectedDataTypeTracking</key>
+				<false/>
+				<key>NSPrivacyCollectedDataTypePurposes</key>
+				<array>
+					<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+				</array>
+			</dict>
+		</array>
+		<!-- dart:io stat() on the workspace files (sizes, dates) inside the
+		     app container. Plugins ship their own manifests. -->
+		<key>NSPrivacyAccessedAPITypes</key>
+		<array>
+			<dict>
+				<key>NSPrivacyAccessedAPIType</key>
+				<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+				<key>NSPrivacyAccessedAPITypeReasons</key>
+				<array>
+					<string>C617.1</string>
+				</array>
+			</dict>
+		</array>
+	</dict>
+</plist>

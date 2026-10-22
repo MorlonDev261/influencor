@@ -7,12 +7,12 @@
 La version est dans [pubspec.yaml](../../../pubspec.yaml):
 
 ```yaml
-version: 0.1.0+1
+version: 1.0.0+1
 ```
 
 Format Flutter:
 
-- `0.1.0`: version visible;
+- `1.0.0`: version visible;
 - `+1`: build number.
 
 ## Modifier la version

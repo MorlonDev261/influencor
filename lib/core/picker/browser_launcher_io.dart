@@ -680,6 +680,12 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
       return '/';
     }
     final home = _env('HOME');
+    if (Platform.isIOS) {
+      // HOME is the app container; only Documents is the user's (and the
+      // folder the Files app shows as "On My iPhone > Influencor").
+      final documents = p.join(home, 'Documents');
+      if (Directory(documents).existsSync()) return documents;
+    }
     if (home.isNotEmpty && Directory(home).existsSync()) return home;
     return '/';
   }
@@ -713,6 +719,9 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
           '$internal/Download');
       add('DCIM', Icons.photo_camera_outlined, '$internal/DCIM');
       add(strings.images, Icons.image_outlined, '$internal/Pictures');
+    } else if (Platform.isIOS) {
+      add(strings.locationDocuments, Icons.smartphone_outlined,
+          p.join(_env('HOME'), 'Documents'));
     } else {
       final home = _env('HOME');
       add(strings.locationHome, Icons.home_outlined, home);

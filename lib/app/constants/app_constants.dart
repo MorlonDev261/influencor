@@ -5,6 +5,12 @@ abstract final class AppConstants {
   /// Keep in sync with `version:` in pubspec.yaml (without the build number).
   static const String version = '1.0.0';
 
+  /// Public privacy policy (influencor-web): English page for English,
+  /// French page otherwise (also for Malagasy).
+  static String privacyPolicyUrl(String languageCode) => languageCode == 'en'
+      ? 'https://influencor.mi-kandra.org/privacy/'
+      : 'https://influencor.mi-kandra.org/confidentialite/';
+
   /// Layout breakpoint (logical pixels) above which the desktop / tablet
   /// layout (persistent sidebar, wider grids) is used.
   static const double desktopBreakpoint = 840;

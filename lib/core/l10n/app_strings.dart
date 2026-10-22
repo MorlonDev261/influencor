@@ -616,6 +616,9 @@ class AppStrings {
   String get aboutPrivacyTitle =>
       _t('Vos données restent chez vous', 'Your data stays with you',
           mg: 'Mijanona aminao ny angonao');
+  String get privacyPolicy =>
+      _t('Politique de confidentialité', 'Privacy policy',
+          mg: 'Politika momba ny fiainana manokana');
   String get aboutPrivacyBody => _t(
         'Votre bibliothèque est un simple dossier sur votre appareil. '
             'Le nettoyage de métadonnées se fait entièrement en local : '
@@ -1009,6 +1012,14 @@ class AppStrings {
       'Appui long : colonnes affichées par défaut',
       'Long press: columns shown by default',
       mg: 'Tsindrio ela: tsanganana aseho foana');
+  String get toggleHiddenColumnsHint => _t(
+      'Appui long ou double-clic : afficher/masquer les colonnes [...]',
+      'Long press or double-click: show/hide [...] columns',
+      mg: 'Tsindrio ela na indroa: aseho/afeno ny tsanganana [...]');
+  String get doubleTapToggleHiddenColumns => _t(
+      'Double-clic : afficher/masquer les colonnes [...]',
+      'Double-click: show/hide [...] columns',
+      mg: 'Tsindrio indroa: aseho/afeno ny tsanganana [...]');
   String get undo => _t('Annuler', 'Undo', mg: 'Averina');
   String get done => _t('Terminé', 'Done', mg: 'Vita');
   String get formulaPickHint => _t(
@@ -1296,6 +1307,13 @@ class AppStrings {
       _t('Documents', 'Documents', mg: 'Antontan-taratasy');
   String get locationDownloads =>
       _t('Téléchargements', 'Downloads', mg: 'Fisintonana');
+
+  // iOS source choice (system pickers)
+  String get addFrom =>
+      _t('Ajouter depuis', 'Add from', mg: 'Hanampy avy amin\'ny');
+  String get sourcePhotos =>
+      _t('Photothèque', 'Photo library', mg: 'Tahirin-tsary');
+  String get sourceFiles => _t('Fichiers', 'Files', mg: 'Rakitra');
   String nSelected(int n) =>
       _t('$n sélectionné(s)', '$n selected', mg: '$n voafantina');
   String get selectAll =>

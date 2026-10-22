@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -89,11 +90,73 @@ void main() {
 
       // 6. Normal tap on edit button enters edit mode
       await tester.tap(editButton);
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
 
       // Edit mode is active (cancel/close icon displayed, plus button appears)
       expect(find.byIcon(Icons.close), findsOneWidget);
       expect(find.byIcon(Icons.add), findsWidgets);
+    });
+
+    Future<void> pumpSecretTable(WidgetTester tester) async {
+      const path = '/workspace/double.table';
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tableDocumentProvider(path).overrideWith(
+              (ref) => TableDocument(
+                columns: const [
+                  TableColumnDef(id: 'c1', title: 'Nom'),
+                  TableColumnDef(id: 'c2', title: '[Secret]'),
+                ],
+                rows: const [
+                  TableRowData(id: 'r1', cells: {'c1': 'Jean', 'c2': '1234'}),
+                ],
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: TableScreen(path: path)),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> doubleTap(WidgetTester tester, Finder finder) async {
+      await tester.tap(finder);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('double tap on edit toggles hidden columns, not edit mode',
+        (tester) async {
+      await pumpSecretTable(tester);
+      final editButton = find.byIcon(Icons.edit_outlined);
+
+      await doubleTap(tester, editButton);
+      expect(find.text('[Secret]'), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsNothing, reason: 'still viewing');
+
+      await doubleTap(tester, editButton);
+      expect(find.text('[Secret]'), findsNothing);
+    });
+
+    testWidgets('in edit mode, double tap on save toggles hidden columns',
+        (tester) async {
+      await pumpSecretTable(tester);
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      expect(find.text('[Secret]'), findsNothing);
+
+      final save = find.byIcon(Icons.save_outlined);
+      await doubleTap(tester, save);
+      expect(find.text('[Secret]'), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsOneWidget, reason: 'not saved');
+
+      await doubleTap(tester, save);
+      expect(find.text('[Secret]'), findsNothing);
+      expect(find.byIcon(Icons.close), findsOneWidget);
     });
   });
 
@@ -147,6 +210,7 @@ void main() {
     testWidgets('deleting a row and a column, with undo', (tester) async {
       await pumpTable(tester, buildTable());
       await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
 
       // Header delete buttons come first, then one per row.
@@ -177,6 +241,7 @@ void main() {
         (tester) async {
       await pumpTable(tester, buildTable());
       await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
 
       await tester.longPress(find.byIcon(Icons.save_outlined));
@@ -197,6 +262,7 @@ void main() {
 
       // Leave edit mode: "Secret" is now visible, "[Ville]" hidden.
       await tester.tap(find.byIcon(Icons.close));
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
       expect(find.text('Secret'), findsOneWidget);
       expect(find.text('[Ville]'), findsNothing);
@@ -209,6 +275,8 @@ void main() {
       expect(headerX(tester, 'Nom'), lessThan(headerX(tester, 'Ville')));
 
       await tester.tap(find.byIcon(Icons.edit_outlined));
+
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
 
       final handle = find.byIcon(Icons.drag_indicator).first;
@@ -223,6 +291,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.close));
+
+      await tester.pump(kDoubleTapTimeout);
       await tester.pumpAndSettle();
       expect(headerX(tester, 'Ville'), lessThan(headerX(tester, 'Nom')));
     });

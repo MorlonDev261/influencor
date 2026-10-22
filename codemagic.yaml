@@ -1,0 +1,53 @@
+# Build iOS d'Influencor dans le cloud : `flutter build ipa` ne fonctionne pas
+# sous Windows. Prérequis (compte Apple, clé API, capacités de l'App ID,
+# Firebase) : docs/developer/build/builds.md, section « iOS (App Store) ».
+#
+# Lancement manuel depuis Codemagic (aucun déclencheur automatique).
+workflows:
+  ios-release:
+    name: iOS → TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      # Nom donné à la clé API App Store Connect dans Codemagic
+      # (Team settings → Integrations → Developer Portal).
+      app_store_connect: Influencor ASC
+    environment:
+      # Même version que le poste de dev (SceneDelegate / moteur implicite).
+      flutter: 3.47.5
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.influencor.app
+      # Décommenter une fois le groupe « firebase » créé dans Codemagic avec
+      # GOOGLE_SERVICE_INFO_PLIST (le fichier encodé en base64). Sans lui,
+      # l'app est construite sans notifications push.
+      # groups:
+      #   - firebase
+    scripts:
+      - name: GoogleService-Info.plist (optionnel)
+        script: |
+          if [ -n "$GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode > ios/Runner/GoogleService-Info.plist
+          else
+            echo "GOOGLE_SERVICE_INFO_PLIST absent : build sans push."
+          fi
+      - name: Dépendances
+        script: flutter pub get
+      - name: Profils de signature
+        script: xcode-project use-profiles
+      - name: Build IPA
+        # Version et numéro de build lus dans pubspec.yaml (1.0.0+1).
+        # App Store Connect refuse un second envoi avec le même numéro.
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

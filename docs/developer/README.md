@@ -17,6 +17,8 @@ préparer des releases.
 - [Tests](./tests.md)
 - [Builds](./build/builds.md)
 - [Signature et versioning](./release/signing-and-versioning.md)
+- [Publier sur Google Play — de A à Z](./release/play-store.md)
+- [Publier sur l'App Store — de A à Z](./release/app-store.md)
 - [Publication](./deployment/publishing.md)
 - [Web : app Flutter (retirée de influencor.mi-kandra.org)](./deployment/web-mi-kandra.md)
 - [`start.sh` : étapes et commandes](./deployment/start-sh.md)

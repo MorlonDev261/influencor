@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<!-- Push (FCM via APNs). Xcode rewrites it to "production" when the
+		     build is exported for the App Store / TestFlight. -->
+		<key>aps-environment</key>
+		<string>development</string>
+		<!-- Universal Links for the reseller space (same links as the Android
+		     App Links): needs apple-app-site-association on the host, see
+		     docs/developer/build/builds.md. -->
+		<key>com.apple.developer.associated-domains</key>
+		<array>
+			<string>applinks:reseller.poma-original.com</string>
+		</array>
+	</dict>
+</plist>

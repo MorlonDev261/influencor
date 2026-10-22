@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -79,6 +80,7 @@ void main() {
       ),
     );
     await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump(kDoubleTapTimeout);
     await tester.pumpAndSettle();
 
     // 4 header fields, then the row's cells: Note is the 8th field.
@@ -108,6 +110,8 @@ void main() {
         findsNothing);
 
     await tester.tap(find.byIcon(Icons.close));
+
+    await tester.pump(kDoubleTapTimeout);
     await tester.pumpAndSettle();
     expect(find.text('500'), findsOneWidget);
   });
@@ -128,6 +132,7 @@ void main() {
       ),
     );
     await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pump(kDoubleTapTimeout);
     await tester.pumpAndSettle();
 
     final marge = find.byType(TextField).at(2);
@@ -144,6 +149,7 @@ void main() {
 
     await tester.tap(find.text('Terminé'));
     await tester.tap(find.byIcon(Icons.close));
+    await tester.pump(kDoubleTapTimeout);
     await tester.pumpAndSettle();
     expect(find.text('Marge'), findsOneWidget);
     expect(find.text('15'), findsOneWidget);

@@ -465,11 +465,12 @@ class _TableScreenState extends ConsumerState<TableScreen> {
             ),
           ),
       ],
-      // Long press lists the columns to show by default. As on the edit
-      // button, the tooltip only shows on mouse hover so it doesn't swallow
-      // the long press.
+      // Long press lists the columns to show by default; double tap toggles
+      // the hidden ([…]) columns, as on the edit button. The tooltip only
+      // shows on mouse hover so it doesn't swallow the long press.
       builder: (context, controller, _) => Tooltip(
-        message: '${strings.save}\n${strings.longPressSaveForColumns}',
+        message: '${strings.save}\n${strings.longPressSaveForColumns}\n'
+            '${strings.doubleTapToggleHiddenColumns}',
         triggerMode: TooltipTriggerMode.manual,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -479,6 +480,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                   HapticFeedback.mediumImpact();
                   controller.isOpen ? controller.close() : controller.open();
                 },
+          onDoubleTap: _saving ? null : () => _toggleHiddenColumns(strings),
           child: IconButton(
             icon: _saving
                 ? const SizedBox(
@@ -526,15 +528,18 @@ class _TableScreenState extends ConsumerState<TableScreen> {
         title: Text(p.basenameWithoutExtension(widget.path)),
         actions: [
           if (_draft != null)
-            // Long press toggles the hidden ([…]) columns. The tooltip only
-            // shows on mouse hover: as a long-press tooltip (the touch
-            // default) it would swallow that gesture.
+            // Long press or double tap toggles the hidden ([…]) columns. The
+            // tooltip only shows on mouse hover: as a long-press tooltip (the
+            // touch default) it would swallow that gesture.
             Tooltip(
-              message: _editing ? strings.cancel : strings.edit,
+              message: '${_editing ? strings.cancel : strings.edit}\n'
+                  '${strings.toggleHiddenColumnsHint}',
               triggerMode: TooltipTriggerMode.manual,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onLongPress:
+                    _saving ? null : () => _toggleHiddenColumns(strings),
+                onDoubleTap:
                     _saving ? null : () => _toggleHiddenColumns(strings),
                 child: IconButton(
                   icon: Icon(_editing ? Icons.close : Icons.edit_outlined),

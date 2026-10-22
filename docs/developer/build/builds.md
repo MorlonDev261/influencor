@@ -80,86 +80,64 @@ Un APK téléchargé depuis le site déclenche les avertissements Android
 (« sources inconnues », Play Protect). Installée depuis Google Play,
 l'application n'en affiche aucun.
 
-L'AAB (`Influencor-release.aab` dans `dist/`) est déjà prêt pour Play : signé
-avec la clé d'upload (`android/key.properties` → `android/app/influencor-release.jks`),
-`targetSdk` 36. Ne jamais perdre ce keystore ni ses mots de passe : sans eux,
-plus de mise à jour possible sans passer par le support Google.
+L'AAB (`Influencor-release.aab` dans `dist/`) est signé avec la clé d'upload
+(`android/key.properties` → `android/app/influencor-release.jks`), `targetSdk`
+36. Ne jamais perdre ce keystore ni ses mots de passe.
 
-Configuration une seule fois :
-
-1. Créer un compte Play Console (<https://play.google.com/console>, 25 $ une
-   fois, vérification d'identité).
-2. Créer l'application (nom « Influencor », application gratuite) et accepter
-   **Play App Signing** : Google re-signe l'app avec sa propre clé, la clé
-   d'upload ne sert qu'à envoyer les AAB.
-3. **App Links** : copier l'empreinte SHA-256 de la *clé de signature d'app*
-   (Play Console → Test et publication → Intégrité de l'app → Signature
-   d'application) et l'ajouter dans `assetlinks.json` de
-   `reseller.poma-original.com`, à côté de celle de la clé d'upload. Sinon,
-   les liens revendeur ne s'ouvrent plus dans l'app installée depuis Play.
-4. Compléter « Contenu de l'application » : politique de confidentialité (URL
-   obligatoire), sécurité des données (l'app envoie des données aux
-   fournisseurs IA configurés par l'utilisateur et reçoit des notifications
-   Firebase), classification du contenu, public cible.
-
-### Accès à tous les fichiers (`MANAGE_EXTERNAL_STORAGE`)
-
-Permission restreinte par Google Play : il faut remplir la déclaration
-(Contenu de l'application → Autorisations « Accès à tous les fichiers ») et
-Google peut la refuser. Justification à fournir (usage cœur : gestion de
-documents) :
-
-> Influencor est une bibliothèque de contenus pour créateurs et
-> gestionnaires de réseaux sociaux. L'utilisateur choisit un dossier de travail
-> dans le stockage partagé (par ex. Documents/Influencor) qui contient ses
-> images, vidéos et textes organisés par projet ; ce dossier reste lisible par
-> les autres applications (galerie, WhatsApp, Facebook) pour la publication et
-> survit à la désinstallation. L'application intègre un explorateur de fichiers
-> pour importer des médias depuis n'importe quel dossier de l'appareil.
-> L'accès est demandé uniquement quand l'utilisateur choisit un dossier hors de
-> l'espace privé de l'app ; s'il refuse, l'app fonctionne dans son dossier
-> privé.
-
-Joindre une courte vidéo montrant le choix du dossier de travail et
-l'import de médias.
-
-Si Google refuse : l'app sait déjà fonctionner sans cette permission (dossier
-privé, `WorkspaceService.appFolderPath`). Il faudrait alors une variante Play
-sans la permission dans le manifeste, au prix d'un dossier de travail effacé à
-la désinstallation et invisible dans la galerie.
-
-### Tests obligatoires (comptes personnels)
-
-Un compte Play Console **personnel** récent doit faire un **test fermé avec au
-moins 12 testeurs pendant 14 jours consécutifs** avant de pouvoir demander la
-production. Un compte **organisation** (avec numéro D-U-N-S) n'a pas cette
-obligation.
-
-Publication :
-
-1. Test et publication → Tests → Test fermé → créer une release → déposer
-   `Influencor-release.aab` → ajouter les testeurs (liste d'e-mails Google).
-2. Après les 14 jours : Production → demander l'accès, puis créer une release
-   avec le même AAB (ou un plus récent).
-
-Chaque nouvel AAB doit avoir un `versionCode` supérieur (le nombre après `+`
-dans `version:` de `pubspec.yaml`).
+Publication pas à pas (compte, fiche, déclarations, test fermé, production,
+mises à jour) : **[Publier sur Google Play — de A à Z](../release/play-store.md)**.
 
 ## iOS (App Store)
 
 Sur iPhone, l'App Store est le seul canal de distribution grand public : il
 n'existe pas d'équivalent au téléchargement direct d'un APK ou d'un EXE.
+`flutter build ipa` ne fonctionne pas sous Windows : l'app est compilée et
+envoyée sur TestFlight par Codemagic (`codemagic.yaml`, workflow
+`ios-release`).
 
-Prérequis :
+Publication pas à pas (compte Apple, App ID, Firebase, Codemagic, TestFlight,
+fiche, revue, mises à jour) : **[Publier sur l'App Store — de A à Z](../release/app-store.md)**.
 
-- compte Apple Developer Program (99 $/an) ;
-- un Mac avec Xcode, ou un service de build cloud (Codemagic, GitHub Actions
-  avec runner macOS), car `flutter build ipa` ne fonctionne pas sous Windows.
+### Déjà prêt dans le dépôt
 
-Le bundle id est déjà `com.influencor.app`. Étapes : créer l'app dans App
-Store Connect, `flutter build ipa --release` (signature automatique Xcode),
-envoyer avec Transporter ou Xcode, tester via TestFlight, puis soumettre à la
-revue Apple.
+- `ios/Runner/Info.plist` : textes d'autorisation (appareil photo et micro
+  pour les envois depuis le WebView revendeur, ajout à Photos depuis la feuille
+  de partage, photothèque et musique exigés par les API que file_picker
+  embarque), `ITSAppUsesNonExemptEncryption = false` (HTTPS seulement : pas
+  de question sur le chiffrement à chaque envoi), dossier de travail visible
+  dans l'app Fichiers (`UIFileSharingEnabled`), mode d'arrière-plan
+  `remote-notification`, liens profonds gérés par `app_links`
+  (`FlutterDeepLinkingEnabled = false`, comme sur Android).
+- `ios/Runner/Runner.entitlements` : push (`aps-environment`) et Universal
+  Links (`applinks:reseller.poma-original.com`).
+- `ios/Runner/PrivacyInfo.xcprivacy` : manifeste de confidentialité (pas de
+  pistage, jeton push lié au compte revendeur, horodatage de fichiers).
+- Phase Xcode « Copy GoogleService-Info.plist » : copie le fichier Firebase
+  dans l'app s'il est présent, sinon l'app se construit sans push.
+- `codemagic.yaml` : build signé et envoi sur TestFlight (workflow
+  `ios-release`, lancement manuel).
+
+### Choix de fichiers sur iPhone
+
+Le navigateur de fichiers intégré ne voit que le conteneur de l'app. Sur iOS,
+`AppFilePicker` passe donc par les sélecteurs du système pour tout sauf le
+choix d'un dossier : une feuille « Photothèque / Fichiers » s'ouvre
+(PHPicker, sans demande d'autorisation, ou l'app Fichiers). Les photos
+arrivent en JPEG et les vidéos en H.264 (copie « compatible » de Photos : le
+HEIC n'a pas de miniature dans l'app). L'import dans la bibliothèque copie
+toujours (rien à déplacer depuis Photos). Les copies que file_picker laisse
+dans `Documents/picked_images` sont déplacées dans le dossier temporaire
+(`picked_media_io.dart`) pour ne pas apparaître dans Fichiers. Le choix d'un
+dossier (espace de travail, destination) reste dans le navigateur intégré,
+qui s'ouvre sur `Documents`.
+
+### Limites connues sur iPhone
+
+- Les noms d'origine des photos sont perdus (PHPicker ne les transmet pas à
+  file_picker) : elles sont nommées `IMG_aaaammjj_hhmmss.jpg`.
+- Aucun build iOS n'a encore été lancé : le premier passage sur Codemagic
+  valide la compilation des plugins natifs (media_kit, super_clipboard,
+  WebView, Firebase).
 
 ## Windows release
 

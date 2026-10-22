@@ -30,8 +30,10 @@ class WorkspaceService {
   final Future<Directory> Function() _appFolderBase;
 
   /// App-specific storage: always writable, **no storage permission needed**.
+  /// External storage exists on Android only (path_provider throws on iOS); on
+  /// iOS the Documents folder is the one shown in the Files app.
   static Future<Directory> _defaultAppFolderBase() async =>
-      await getExternalStorageDirectory() ??
+      (Platform.isAndroid ? await getExternalStorageDirectory() : null) ??
       await getApplicationDocumentsDirectory();
 
   static const _fileName = 'clipboard_config.json';

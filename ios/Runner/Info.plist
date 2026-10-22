@@ -24,8 +24,24 @@
 		<string>????</string>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>FlutterDeepLinkingEnabled</key>
+		<false/>
+		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
+		<key>LSSupportsOpeningDocumentsInPlace</key>
+		<true/>
+		<key>NSAppleMusicUsageDescription</key>
+		<string>Influencor n'accède à votre bibliothèque musicale que si vous y choisissez un fichier à importer.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Influencor utilise l'appareil photo uniquement quand vous prenez une photo ou une vidéo à envoyer depuis l'espace revendeur.</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Influencor utilise le micro uniquement pour le son des vidéos que vous filmez depuis l'espace revendeur.</string>
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>Influencor enregistre dans Photos les images et vidéos que vous choisissez d'exporter.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Influencor importe uniquement les photos et vidéos que vous choisissez dans votre photothèque.</string>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>
@@ -48,6 +64,12 @@
 			</dict>
 		</dict>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
+		<true/>
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>remote-notification</string>
+		</array>
+		<key>UIFileSharingEnabled</key>
 		<true/>
 		<key>UILaunchStoryboardName</key>
 		<string>LaunchScreen</string>

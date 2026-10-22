@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/constants/app_constants.dart';
 import '../../../core/l10n/app_strings.dart';
@@ -117,6 +118,21 @@ class AboutScreen extends ConsumerWidget {
                 const SizedBox(height: 6),
                 section(s.aboutPrivacyTitle, s.aboutPrivacyBody,
                     icon: Icons.lock_outline),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: Text(s.privacyPolicy),
+                      onPressed: () => launchUrl(
+                        Uri.parse(AppConstants.privacyPolicyUrl(
+                            s.locale.languageCode)),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                    ),
+                  ),
+                ),
                 section(s.aboutCleanerFormatsTitle, s.aboutCleanerFormatsBody,
                     icon: Icons.perm_media_outlined),
                 section(s.aboutLimitsTitle, s.aboutLimitsBody,
