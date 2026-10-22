@@ -11,6 +11,9 @@
 #   ./start.sh --logs     journaux du nginx, lisibles (--errors, --grep <texte>, --since 1h, --raw)
 #   ./start.sh --status   état Mi Kandra (mode, routes) + sonde publique de chaque domaine
 #
+# Au démarrage (et avec --build), une carte d'accueil bleue (scripts/banner.sh) résume le
+# serveur : CPU, RAM, disque, IP, OS, Docker, domaines, commit. INFLUENCOR_NO_BANNER=1 la masque.
+#
 # Domaines — à chaud : l'app n'est jamais redémarrée (nginx -s reload, sans coupure) :
 #   ./start.sh --domains                        liste les domaines, l'origine et l'expiration du certificat
 #   ./start.sh --domain-add <domaine> [--force] ajoute un domaine : contrôle DNS, test HTTP-01,
@@ -421,6 +424,11 @@ for a in "$@"; do
     *) ARG=$a ;;
   esac
 done
+
+# Carte d'accueil (scripts/banner.sh) au démarrage et avant le build ; INFLUENCOR_NO_BANNER=1 la masque.
+case "$CMD" in
+  ""|--build) [ "${INFLUENCOR_NO_BANNER:-0}" = 1 ] || sh scripts/banner.sh $(domains) || true ;;
+esac
 
 case "$CMD" in
   --stop)          exec docker compose down ;;
