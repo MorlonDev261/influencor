@@ -118,7 +118,37 @@ fi
 # Ctrl+C arrête docker compose et awk ensemble : on sort proprement.
 trap 'exit 0' INT
 
-"${compose[@]}" logs --no-color --timestamps ${follow_args[@]+"${follow_args[@]}"} "${history_args[@]}" \
-    ${services[@]+"${services[@]}"} 2>&1 \
-  | "${awk_cmd[@]}" -v color="$color" -v tzoff="$tzoff" -v minlevel="$minlevel" \
+# `docker compose logs` rend l'historique conteneur par conteneur : sans tri,
+# les heures ne se suivent pas d'un service à l'autre. L'historique passe donc
+# par un tri stable sur l'horodatage (fraction de seconde complétée à 9
+# chiffres pour un tri lexicographique juste) et s'arrête à T0, puis le suivi
+# reprend à T0 : ni trou ni doublon à la jonction. Une ligne sans horodatage
+# garde la clé de la précédente. La coupure est faite ici et non par
+# `--until` : Docker applique --tail AVANT --until et perd alors des lignes.
+t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+sort_by_time() {
+  awk -v t0="${t0%Z}.000000000" 'BEGIN { key = "0" }
+    {
+      p = index($0, "| ")
+      if (p > 0) {
+        ts = substr($0, p + 2)
+        if (ts ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/) {
+          frac = substr(ts, 20); sub(/[^.0-9].*$/, "", frac); sub(/^\./, "", frac)
+          while (length(frac) < 9) frac = frac "0"
+          key = substr(ts, 1, 19) "." substr(frac, 1, 9)
+        }
+      }
+      if (key < t0) print key "\t" $0
+    }' | LC_ALL=C sort -s -t "$(printf '\t')" -k1,1 | cut -f2-
+}
+
+{
+  "${compose[@]}" logs --no-color --timestamps "${history_args[@]}" \
+      ${services[@]+"${services[@]}"} 2>&1 | sort_by_time
+  if [ "$follow" -eq 1 ]; then
+    "${compose[@]}" logs --no-color --timestamps -f --since "$t0" \
+        ${services[@]+"${services[@]}"} 2>&1
+  fi
+} | "${awk_cmd[@]}" -v color="$color" -v tzoff="$tzoff" -v minlevel="$minlevel" \
       -v grep="$grep_text" -v health="$health" -v prefix="${LOGS_PREFIX:-}" -f "$AWK_SCRIPT"

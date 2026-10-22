@@ -10,8 +10,9 @@
 #
 # Reconnaît : les lignes JSON de src/lib/logger.ts (level/message/event/
 # context/stack), les accès nginx (format « combined »), les journaux
-# d'erreurs nginx, Postgres, Redis et logback (Metarank) ; tout le reste est
-# classé par mots-clés (error/warn…). Les lignes de continuation (stack
+# d'erreurs nginx, Postgres, Redis et logback (Metarank), le logfmt
+# (« level=warn », scheduler) et les préfixes « INFO: »/« WARNING: » (MinIO) ;
+# tout le reste est classé par mots-clés (error/warn…). Les lignes de continuation (stack
 # traces indentées) héritent du niveau de la ligne précédente du même service.
 #
 # POSIX awk uniquement (pas d'intervalles {n}, pas de fonctions gawk) : le
@@ -91,6 +92,28 @@ function guesslevel(s,    l) {
   if (l ~ /(^|[^a-z])(error|errors|err|fatal|panic|exception|failed|failure|unhandled|uncaught|econnrefused|violated|p[0-9][0-9][0-9][0-9])([^a-z]|$)/) return "error"
   if (l ~ /(^|[^a-z])(warn|warning|deprecated|deprecation)([^a-z]|$)/) return "warn"
   return "info"
+}
+
+# Niveau déclaré dans un texte libre, prioritaire sur les mots-clés : logfmt
+# (« ts=… level=warn job=… retrying after fetch failed » reste un
+# avertissement malgré « failed ») puis préfixes en tête de ligne, éventuellement
+# enchaînés (MinIO : « INFO: WARNING: … A host failure … » → warn). Pose
+# OWNLVL = 1 si la ligne déclare son niveau (ce n'est alors jamais la suite
+# d'un autre événement) et PFXLEN = longueur des préfixes, retirés à l'affichage.
+function textlevel(s,    t, w, word) {
+  OWNLVL = 1; PFXLEN = 0
+  if (match(s, /(^|[ \t])level=[A-Za-z]+/)) {
+    t = substr(s, RSTART, RLENGTH); sub(/.*level=/, "", t)
+    return normlevel(t)
+  }
+  t = s; word = ""
+  while (match(t, /^(DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|FATAL): +/)) {
+    w = substr(t, 1, RLENGTH); sub(/:.*/, "", w); word = w
+    PFXLEN += RLENGTH; t = substr(t, RLENGTH + 1)
+  }
+  if (word != "") return normlevel(word)
+  OWNLVL = 0
+  return guesslevel(s)
 }
 
 function badge(lvl) {
@@ -183,8 +206,11 @@ function iscont(msg, svc) {
   if (!(svc in LAST)) return 0
   if (msg ~ /^[ \t]/ || msg ~ /^(at |[])}])/) return 1
   if (msg ~ /^[0-9-]+ [0-9:.]+ [A-Z]+ \[[0-9]+\] (DETAIL|HINT|STATEMENT|CONTEXT|QUERY|LOCATION):/) return 1
+  # Bannière en art ASCII (Metarank) : seules ses premières lignes sont
+  # indentées, les suivantes commencent par « | » ou « \ ».
+  if (msg ~ /^[ \t_|()<>Y.\/\\-]+$/ && msg ~ /[_|\/\\]/) return 1
   if (structured(msg)) return 0
-  return PLAIN[svc] && LAST[svc] == "error" && substr(msg, 1, 1) != "{" && guesslevel(msg) == "info"
+  return PLAIN[svc] && LAST[svc] == "error" && substr(msg, 1, 1) != "{" && textlevel(msg) == "info" && !OWNLVL
 }
 
 # Ligne portant son propre en-tête (Postgres, nginx error_log, Redis, logback).
@@ -282,6 +308,14 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
   }
   if (trim(msg) == "") next
   if (!(health + 0) && msg ~ /\/(api\/health|healthz)/) next
+  # Sonde de vivacité de Metarank (GET /metrics toutes les ~5 s par l'app) :
+  # masquée avec sa réponse, sauf si celle-ci n'est pas un succès.
+  if (!(health + 0) && msg ~ / - HTTP\/1\.1 GET \/metrics$/) { PROBE[SVC] = 1; next }
+  if (PROBE[SVC]) {
+    PROBE[SVC] = 0
+    if (msg ~ / - HTTP\/1\.1 2[0-9][0-9]( [A-Za-z ]*)?$/) next
+    sub(/ - HTTP\/1\.1 /, " - HTTP/1.1 GET /metrics → ", msg)
+  }
 
   # Continuation d'un événement multi-lignes (stack trace, erreur Prisma,
   # DETAIL Postgres…) : même service, même seconde que la ligne précédente.
@@ -298,7 +332,7 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
   msg = trim(msg)
   # --grep choisit des événements : la stack d'une ligne retenue la suit.
   if (grep != "" && index(tolower(SVC " " msg), grep) == 0) {
-    SHOWN[SVC] = 0; LAST[SVC] = guesslevel(msg); PLAIN[SVC] = 1
+    SHOWN[SVC] = 0; LAST[SVC] = textlevel(msg); PLAIN[SVC] = 1
     next
   }
 
@@ -333,7 +367,10 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
     word = msg; sub(/ .*/, "", word); sub(/^[A-Z]+ +/, "", msg)
     lvl = normlevel(word)
   }
-  if (lvl == "") lvl = guesslevel(msg)
+  if (lvl == "") {
+    lvl = textlevel(msg)
+    if (PFXLEN > 0) msg = substr(msg, PFXLEN + 1)
+  }
 
   LAST[SVC] = lvl; PLAIN[SVC] = 1
   if (rank(lvl) < minlevel + 0) { SHOWN[SVC] = 0; next }
