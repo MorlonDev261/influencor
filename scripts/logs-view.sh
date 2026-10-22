@@ -10,7 +10,7 @@
 #   --errors        erreurs seulement
 #   --warn          avertissements et erreurs
 #   --grep <texte>  ne garde que les lignes contenant ce texte
-#   --since <durée> depuis 10m, 2h, 2026-10-20T08:00… (défaut : 200 lignes)
+#   --since <durée> depuis 10m, 2h, 2026-10-20T08:00… (aussi 20min, 3j ; défaut : 200 lignes)
 #   --tail <n>      nombre de lignes d'historique (défaut : 200)
 #   --no-follow     affiche l'historique puis rend la main
 #   --health        garde les sondes /api/health (et /healthz, masquées par défaut)
@@ -48,13 +48,38 @@ raw=0
 
 die() { printf 'logs : %s\n' "$1" >&2; exit 1; }
 
+# --since : Docker n'accepte que 20m, 2h, 1h30m… ou une date. Les écritures
+# courantes (20min, 2 heures, 3j) sont traduites ; le reste est refusé ici avec
+# un message clair, au lieu d'une erreur Docker affichée comme une ligne de log.
+normalize_since() {
+  local v n u
+  v=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+  if [[ "$v" =~ ^([0-9]+[smh])+$ ]] \
+     || [[ "$v" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}([t][0-9]{2}(:[0-9]{2}){0,2}(\.[0-9]+)?(z|[+-][0-9]{2}:?[0-9]{2})?)?$ ]]; then
+    printf '%s' "${v//t/T}" | sed 's/z$/Z/'; return 0
+  fi
+  [[ "$v" =~ ^([0-9]+)([a-zéè]+)$ ]] || return 1
+  n=${BASH_REMATCH[1]}; u=${BASH_REMATCH[2]}
+  case "$u" in
+    s|sec|secs|seconde|secondes|second|seconds) printf '%ss' "$n" ;;
+    mn|min|mins|minute|minutes) printf '%sm' "$n" ;;
+    hr|hrs|heure|heures|hour|hours) printf '%sh' "$n" ;;
+    d|j|jour|jours|day|days) printf '%sh' "$((n * 24))" ;;
+    *) return 1 ;;
+  esac
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --all) all=1; shift ;;
     --errors) minlevel=2; shift ;;
     --warn|--warnings) minlevel=1; shift ;;
     --grep) [ -n "${2:-}" ] || die "--grep requiert un texte."; grep_text="$2"; shift 2 ;;
-    --since) [ -n "${2:-}" ] || die "--since requiert une durée (ex. 10m, 2h)."; since="$2"; shift 2 ;;
+    --since)
+      [ -n "${2:-}" ] || die "--since requiert une durée (ex. 10m, 2h)."
+      since=$(normalize_since "$2") \
+        || die "--since : « $2 » non reconnu. Exemples : 20m, 2h, 1h30m, 3j, 2026-10-22, 2026-10-22T08:00."
+      shift 2 ;;
     --tail)
       case "${2:-}" in ''|*[!0-9]*) die "--tail requiert un nombre." ;; esac
       tail_n="$2"; shift 2 ;;
