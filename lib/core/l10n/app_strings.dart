@@ -918,6 +918,24 @@ class AppStrings {
       _t('Importer des fichiers', 'Import files', mg: 'Hampiditra rakitra');
   String get moveFilesIn =>
       _t('Déplacer des fichiers', 'Move files in', mg: 'Hamindra rakitra');
+  String get newTable =>
+      _t('Nouveau tableau', 'New table', mg: 'Tabilao vaovao');
+  String get importTableJson =>
+      _t('Importer un tableau (JSON)', 'Import a table (JSON)',
+          mg: 'Hampiditra tabilao (JSON)');
+  String get importTableJsonHint => _t(
+      'Fichier .json compatible (type « influencor.table »)',
+      'Compatible .json file ("influencor.table" type)',
+      mg: 'Rakitra .json mifanaraka (karazana « influencor.table »)');
+  String get tableNameLabel =>
+      _t('Nom du tableau', 'Table name', mg: 'Anaran\'ny tabilao');
+  String tableImportReport(int ok, int incompatible) => incompatible == 0
+      ? _t('$ok tableau(x) importé(s).', '$ok table(s) imported.',
+          mg: '$ok tabilao nampidirina.')
+      : _t(
+          '$ok tableau(x) importé(s), $incompatible fichier(s) incompatible(s).',
+          '$ok table(s) imported, $incompatible incompatible file(s).',
+          mg: '$ok tabilao nampidirina, $incompatible rakitra tsy mifanaraka.');
 
   // Content categories
   String get folders => _t('Dossiers', 'Folders', mg: 'Dossier');

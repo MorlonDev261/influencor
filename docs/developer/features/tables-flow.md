@@ -15,6 +15,17 @@ Le type attendu est:
 influencor.table
 ```
 
+## Création et import
+
+Le bouton **Ajouter** de `browse_screen.dart` propose :
+
+- **Nouveau tableau** : `_createTable()` crée un tableau vide (3 colonnes,
+  1 ligne) via `LibraryController.createTable()` puis ouvre `tableRoute`.
+- **Importer un tableau (JSON)** : `_importTableJson()` ouvre le sélecteur
+  natif (`PickMode.jsonFiles`, filtre `.json`), valide chaque fichier avec
+  `TableDocument.read()` et recrée les fichiers compatibles dans le dossier
+  courant. Les fichiers incompatibles sont ignorés et comptés dans le rapport.
+
 ## Lecture
 
 `TableDocument.read(path)` lit le fichier en UTF-8 puis tente de parser le JSON.

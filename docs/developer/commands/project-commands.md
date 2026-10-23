@@ -160,7 +160,7 @@ iscc installer/influencor.iss
 Sortie attendue:
 
 ```text
-build/installer/InfluencorSetup.exe
+build/installer/Influencor Setup.exe
 ```
 
 ## Nettoyage

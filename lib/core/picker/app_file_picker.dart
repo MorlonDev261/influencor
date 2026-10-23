@@ -31,10 +31,13 @@ abstract final class AppFilePicker {
     String? initialDirectory,
     String? actionLabel,
   }) {
-    if (_isIOS && mode != PickMode.directory) {
+    if (_isIOS && mode != PickMode.directory && mode != PickMode.jsonFiles) {
       return _pickIOS(context, mode, allowMultiple, title);
     }
-    if (kIsWeb || mode == PickMode.imageFiles || mode == PickMode.mediaFiles) {
+    if (kIsWeb ||
+        mode == PickMode.imageFiles ||
+        mode == PickMode.mediaFiles ||
+        mode == PickMode.jsonFiles) {
       return _native(mode, allowMultiple, title);
     }
     return launcher.launchInAppBrowser(
@@ -150,12 +153,16 @@ abstract final class AppFilePicker {
     ].map((ext) => ext.replaceFirst('.', '')).toList();
     final type = switch (mode) {
       PickMode.imageFiles => native.FileType.image,
-      PickMode.mediaFiles => native.FileType.custom,
+      PickMode.mediaFiles || PickMode.jsonFiles => native.FileType.custom,
       _ => native.FileType.any,
     };
     final result = await native.FilePicker.pickFiles(
       type: type,
-      allowedExtensions: mode == PickMode.mediaFiles ? mediaExtensions : null,
+      allowedExtensions: switch (mode) {
+        PickMode.mediaFiles => mediaExtensions,
+        PickMode.jsonFiles => const ['json'],
+        _ => null,
+      },
       allowMultiple: allowMultiple,
       dialogTitle: title,
     );

@@ -9,7 +9,7 @@ remplir et **ce qui bloque** si on la saute.
 | | |
 |---|---|
 | Identifiant de l'app | `com.influencor.app` |
-| Fichier à envoyer | `dist/latest/android/Influencor-release.aab` |
+| Fichier à envoyer | `dist/latest/android/Influencor.aab` |
 | Clé d'upload | `android/app/influencor-release.jks` (via `android/key.properties`, jamais commités) |
 | Politique de confidentialité | <https://influencor.mi-kandra.org/confidentialite/> |
 | Suppression des données | <https://influencor.mi-kandra.org/confidentialite/#suppression> |
@@ -84,7 +84,7 @@ Sur le PC Windows, à la racine du dépôt `influencor` :
    `-SkipWebsite` évite que le script commite et pousse les nouveaux APK sur le
    site : à retirer quand on veut aussi mettre à jour les téléchargements.
 
-4. Le fichier à envoyer est `dist/latest/android/Influencor-release.aab`. Il
+4. Le fichier à envoyer est `dist/latest/android/Influencor.aab`. Il
    est signé avec la clé d'upload (le build échoue volontairement si
    `android/key.properties` manque).
 
@@ -195,7 +195,7 @@ d'upload.
 
 1. Test et publication → Tests → **Test fermé** → Gérer la piste → Créer une
    release.
-2. Déposer `Influencor-release.aab`, nom de release `1.0.0 (1)`, notes de
+2. Déposer `Influencor.aab`, nom de release `1.0.0 (1)`, notes de
    version en français.
 3. Onglet **Testeurs** → créer une liste avec au moins **12 adresses Gmail** →
    copier le **lien d'inscription** et l'envoyer aux testeurs.

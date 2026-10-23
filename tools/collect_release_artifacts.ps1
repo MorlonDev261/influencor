@@ -77,10 +77,10 @@ foreach ($target in $targets) {
   Copy-IfExists (Join-Path $repo 'build/app/outputs/flutter-apk/app-arm64-v8a-release.apk') $androidDir 'Influencor-arm64-v8a-release.apk'
   Copy-IfExists (Join-Path $repo 'build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk') $androidDir 'Influencor-armeabi-v7a-release.apk'
   Copy-IfExists (Join-Path $repo 'build/app/outputs/flutter-apk/app-x86_64-release.apk') $androidDir 'Influencor-x86_64-release.apk'
-  Copy-IfExists (Join-Path $repo 'build/app/outputs/flutter-apk/app-release.apk') $androidDir 'Influencor-universal-release.apk'
-  Copy-IfExists (Join-Path $repo 'build/app/outputs/bundle/release/app-release.aab') $androidDir 'Influencor-release.aab'
+  Copy-IfExists (Join-Path $repo 'build/app/outputs/flutter-apk/app-release.apk') $androidDir 'Influencor.apk'
+  Copy-IfExists (Join-Path $repo 'build/app/outputs/bundle/release/app-release.aab') $androidDir 'Influencor.aab'
 
-  Copy-IfExists (Join-Path $repo 'build/installer/InfluencorSetup.exe') $windowsDir 'InfluencorSetup.exe'
+  Copy-IfExists (Join-Path $repo 'build/installer/Influencor Setup.exe') $windowsDir 'Influencor Setup.exe'
   Copy-IfExists (Join-Path $repo 'build/msix/Influencor.msix') $windowsDir 'Influencor.msix'
   Copy-IfExists (Join-Path $repo 'build/windows/x64/runner/Influencor.exe') $windowsDir 'Influencor-portable.exe'
   Copy-IfExists (Join-Path $repo 'build/windows/x64/runner/Release/influencor.exe') $windowsDir 'influencor.exe'

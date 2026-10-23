@@ -22,7 +22,7 @@ Le projet produit:
 Artefact attendu:
 
 ```text
-build/installer/InfluencorSetup.exe
+build/installer/Influencor Setup.exe
 ```
 
 La distribution Windows peut se faire par partage direct de l'installateur.
