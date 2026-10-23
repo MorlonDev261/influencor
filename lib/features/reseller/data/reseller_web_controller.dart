@@ -114,8 +114,8 @@ class ResellerWebController {
         if (theme == 'light' || theme == 'dark') {
           // Remembered right away: the app's rebuild must not push it back.
           _theme = theme as String;
-          onThemeChange?.call(
-              theme == 'dark' ? Brightness.dark : Brightness.light);
+          onThemeChange
+              ?.call(theme == 'dark' ? Brightness.dark : Brightness.light);
         }
       }
     } catch (_) {

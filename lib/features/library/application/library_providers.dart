@@ -295,8 +295,7 @@ class LibraryController {
     String sourcePath,
     String cleanedTemp,
   ) async {
-    final result =
-        await _repo.storeCleanedIn(dirPath, sourcePath, cleanedTemp);
+    final result = await _repo.storeCleanedIn(dirPath, sourcePath, cleanedTemp);
     _ref.invalidate(directoryProvider(dirPath));
     _touchIndex();
     return result;

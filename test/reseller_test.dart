@@ -104,7 +104,8 @@ void main() {
       final script = ResellerConfig.themePush('dark');
       expect(script, contains("window.__influencorTheme = 'dark'"));
       expect(script, contains("new CustomEvent('influencor:theme'"));
-      expect(() => ResellerConfig.themePush('blue'), throwsA(isA<AssertionError>()));
+      expect(() => ResellerConfig.themePush('blue'),
+          throwsA(isA<AssertionError>()));
     });
   });
 

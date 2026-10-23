@@ -71,7 +71,10 @@ List<LibraryEntry> entriesForFilter(
 /// view an `index.note` / `index.img` folder opens, however deep each item is.
 List<LibraryEntry> indexedEntries(
         List<LibraryEntry> recursive, EntryKind kind, SortOption sort) =>
-    sortEntries([for (final e in recursive) if (e.kind == kind) e], sort);
+    sortEntries([
+      for (final e in recursive)
+        if (e.kind == kind) e
+    ], sort);
 
 /// Sorts entries with folders first, then by the chosen [sort] option.
 List<LibraryEntry> sortEntries(List<LibraryEntry> entries, SortOption sort) {
