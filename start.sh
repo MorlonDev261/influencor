@@ -173,6 +173,7 @@ render_site() {
       echo "    server_name $rs_d;"
       echo "    ssl_certificate     $2;"
       echo "    ssl_certificate_key $3;"
+      echo "    include /etc/nginx/snippets/mi-kandra-scan-block.conf;"
       echo "    include /etc/nginx/snippets/influencor-app.conf;"
       echo "}"
     fi
@@ -216,6 +217,29 @@ require_live_container() {
 }
 
 # Mode Mi Kandra + ports locaux par lesquels joindre ce nginx.
+# Cohabitation Mi Kandra : choix mémorisé, puis ports de publication adaptés au
+# mode détecté (MI_KANDRA_EDGE_MODE, MI_KANDRA_HTTP(S)_PUBLISH). Mêmes noms que
+# dans les autres projets, vérifiés par scripts/edge/tests/hooks-test.sh. Tout
+# échec est non fatal : le projet doit toujours pouvoir démarrer seul.
+mi_kandra_edge_prepare() {
+  [ -f scripts/edge/mi-kandra-edge.sh ] || return 0
+  sh scripts/edge/mi-kandra-edge.sh choose || true
+  _kep_out=$(sh scripts/edge/mi-kandra-edge.sh env 2>/dev/null) || return 0
+  eval "$_kep_out"
+  return 0
+}
+
+# Enregistre la route dans le routeur partagé (sans effet en mode autonome), ou
+# convertit le voisin qui tient 80/443 si MI_KANDRA_EDGE_AUTOADOPT=1.
+mi_kandra_edge_sync() {
+  [ -f scripts/edge/mi-kandra-edge.sh ] || return 0
+  case "${MI_KANDRA_EDGE_MODE:-standalone}" in
+    shared)  sh scripts/edge/mi-kandra-edge.sh sync || true ;;
+    pending) if [ "${MI_KANDRA_EDGE_AUTOADOPT:-0}" = 1 ]; then sh scripts/edge/mi-kandra-edge.sh adopt --yes || true; fi ;;
+  esac
+  return 0
+}
+
 detect_mode() {
   MODE=${MI_KANDRA_EDGE_MODE:-}
   [ -n "$MODE" ] || MODE=$($EDGE env 2>/dev/null | sed -n 's/^export MI_KANDRA_EDGE_MODE=//p')
@@ -450,10 +474,7 @@ has_domain "$SITE_DOMAIN" && die "$SITE_DOMAIN sert le site vitrine : ./start.sh
 [ -f build/web/index.html ] || die "build/web est absent : lancez ./start.sh --build (ou copiez le build web)."
 
 # Cohabitation : choix mémorisé, puis ports de publication adaptés au mode détecté.
-[ -f scripts/edge/mi-kandra-edge.sh ] && {
-  $EDGE choose || true
-  eval "$($EDGE env 2>/dev/null)" || true
-}
+mi_kandra_edge_prepare
 detect_mode
 
 render_all
@@ -469,10 +490,7 @@ fi
 wait_nginx || die "$NGINX_CTR ne répond pas : docker logs $NGINX_CTR"
 
 # Enregistre la route dans le routeur partagé (sans effet en mode autonome).
-case "$MODE" in
-  shared)  $EDGE sync || true ;;
-  pending) [ "${MI_KANDRA_EDGE_AUTOADOPT:-0}" = 1 ] && $EDGE adopt --yes || true ;;
-esac
+mi_kandra_edge_sync
 
 # Domaines encore sans certificat : émission maintenant que nginx sert le challenge ACME.
 pending_certs=""

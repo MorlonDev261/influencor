@@ -6,7 +6,9 @@
 #
 #   services        app, nginx, db, redis… (défaut : LOGS_DEFAULT_SERVICES,
 #                   sinon tous)
-#   --all           tous les services, même si le projet a un défaut
+#   --all           tout voir : tous les services (même si le projet a un défaut),
+#                   la routine (sondages, checkpoints, sauvegardes), chaque ligne
+#                   du scheduler, le hors-site et les sondes de santé
 #   --errors        erreurs seulement
 #   --warn          avertissements et erreurs
 #   --grep <texte>  ne garde que les lignes contenant ce texte
@@ -24,6 +26,8 @@
 #   LOGS_PREFIX            préfixe retiré des noms de conteneurs (ex. « poma- »)
 #   LOGS_COMPOSE_FILE      fichier compose à utiliser (défaut : celui du dossier)
 #   LOGS_DEFAULT_SERVICES  services suivis sans argument (ex. « web socket »)
+#   LOGS_ROUTINE_PATHS     regex des chemins nginx de routine masqués en succès
+#                          (défaut : ^/api/notifications)
 #
 # La mise en forme est faite par scripts/logs-pretty.awk (POSIX awk). Script
 # identique dans chaque projet Mi Kandra : le modifier partout à la fois.
@@ -71,7 +75,7 @@ normalize_since() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --all) all=1; shift ;;
+    --all) all=1; scans=1; health=1; shift ;;
     --errors) minlevel=2; shift ;;
     --warn|--warnings) minlevel=1; shift ;;
     --grep) [ -n "${2:-}" ] || die "--grep requiert un texte."; grep_text="$2"; shift 2 ;;
@@ -138,7 +142,8 @@ if [ "$color" -eq 1 ]; then
   [ "$minlevel" -eq 2 ] && filter=" · erreurs seulement"
   [ "$minlevel" -eq 1 ] && filter=" · avertissements et erreurs"
   [ -n "$grep_text" ] && filter="$filter · « $grep_text »"
-  [ "$scans" -eq 1 ] && filter="$filter · avec le hors-site"
+  if [ "$all" -eq 1 ]; then filter="$filter · tout, sans filtre"
+  elif [ "$scans" -eq 1 ]; then filter="$filter · avec le hors-site"; fi
   tz_label="heure locale"; [ "$utc" -eq 1 ] && tz_label="UTC"
   printf '\033[1m\033[38;2;212;147;6m%s\033[0m \033[1mlogs\033[0m \033[90m· %s%s · %s' "$title" "$scope" "$filter" "$tz_label"
   [ "$follow" -eq 1 ] && printf ' · Ctrl+C pour quitter'
@@ -183,4 +188,4 @@ sort_by_time() {
         ${services[@]+"${services[@]}"} 2>&1
   fi
 } | "${awk_cmd[@]}" -v color="$color" -v tzoff="$tzoff" -v minlevel="$minlevel" \
-      -v grep="$grep_text" -v health="$health" -v scans="$scans" -v prefix="${LOGS_PREFIX:-}" -f "$AWK_SCRIPT"
+      -v grep="$grep_text" -v health="$health" -v scans="$scans" -v all="$all" -v routine="${LOGS_ROUTINE_PATHS:-}" -v prefix="${LOGS_PREFIX:-}" -f "$AWK_SCRIPT"

@@ -8,6 +8,7 @@
 #
 # Sûr : REFUSE de tourner si un routeur existe déjà ou si 80/443 sont occupés
 # (un serveur réel n'est jamais perturbé). Nécessite docker, curl, openssl.
+# Attend (verrou tests/test-lock.sh) qu'un autre test du routeur ait fini.
 #
 # Usage : sh scripts/edge/tests/selftest.sh
 # Code retour : 0 = tout passe, 1 = au moins un échec, 2 = prérequis absents.
@@ -69,7 +70,7 @@ wait_running() {
 wait_edge_healthy() {
   wh_i=0
   while [ "$wh_i" -lt 60 ]; do
-    [ "$(docker inspect -f '{{.State.Health.Status}}' mi-kandra-edge 2>/dev/null)" = "healthy" ] && return 0
+    [ "$(docker container inspect -f '{{.State.Health.Status}}' mi-kandra-edge 2>/dev/null)" = "healthy" ] && return 0
     wh_i=$((wh_i + 1)); sleep 0.5
   done
   return 1
@@ -78,11 +79,50 @@ native() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
 code() { curl -sk -m 10 -o /dev/null -w '%{http_code}' --resolve "$1:443:127.0.0.1" "https://$1/" 2>/dev/null; }
 body() { curl -sk -m 10 --resolve "$1:443:127.0.0.1" "https://$1/" 2>/dev/null | tr -d '\r\n'; }
 
+# Coupure vue par un visiteur : une sonde toutes les 0,2 s pendant une bascule,
+# puis la plus longue période sans réponse 200 (du premier échec au retour).
+now_ms() { d=$(date +%s%N 2>/dev/null); case "$d" in *N|'') echo $(( $(date +%s) * 1000 )) ;; *) echo $(( d / 1000000 )) ;; esac; }
+probe_start() { # $1 domaine, $2 fichier
+  rm -f "$2" "$2.stop"
+  # -m 2 : une connexion suspendue ne doit pas gonfler la mesure de 10 s.
+  ( while [ ! -f "$2.stop" ]; do
+      printf '%s %s\n' "$(now_ms)" "$(curl -sk -m 2 -o /dev/null -w '%{http_code}' --resolve "$1:443:127.0.0.1" "https://$1/" 2>/dev/null)" >> "$2"
+      sleep 0.2
+    done ) &
+  PROBE_PID=$!
+}
+probe_stop() { touch "$1.stop"; wait "$PROBE_PID" 2>/dev/null; }
+longest_gap_ms() {
+  awk 'BEGIN { s = -1; m = 0 }
+       $2 != "200" { if (s < 0) s = $1; l = $1 }
+       $2 == "200" { if (s >= 0) { if ($1 - s > m) m = $1 - s; s = -1 } }
+       END { if (s >= 0 && l - s > m) m = l - s; print m }' "$1"
+}
+# Plafond de coupure : sous Linux, une bascule se mesure en centaines de ms (avant
+# ces réglages, ~8 s en production) ; sous Docker Desktop (Git Bash, Windows),
+# chaque commande docker coûte ~0,5 s et la même bascule prend 5 à 7 s.
+# MI_KANDRA_TEST_MAX_GAP_MS le remplace.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) GAP_MAX=${MI_KANDRA_TEST_MAX_GAP_MS:-12000} ;;
+  *)                    GAP_MAX=${MI_KANDRA_TEST_MAX_GAP_MS:-3000} ;;
+esac
+# Coupure inférieure au plafond ? Affiche la mesure dans tous les cas.
+check_gap() { # $1 libellé, $2 fichier, $3 plafond en ms
+  cg=$(longest_gap_ms "$2")
+  check "$1 : coupure de ${cg} ms (plafond $3 ms)" "$([ "$cg" -le "$3" ] && echo ok || echo "trop longue")" "ok"
+}
+
 for t in docker curl openssl; do command -v "$t" >/dev/null 2>&1 || { echo "Prérequis absent : $t" >&2; exit 2; }; done
 docker info >/dev/null 2>&1 || { echo "Docker indisponible" >&2; exit 2; }
-if docker inspect mi-kandra-edge >/dev/null 2>&1; then echo "Un routeur mi-kandra-edge existe déjà : test refusé pour ne pas perturber un serveur réel." >&2; exit 2; fi
-if docker ps --format '{{.Ports}}' | grep -Eq ':(80|443)->'; then echo "80/443 sont occupés : test refusé." >&2; exit 2; fi
 docker image inspect "$IMG" >/dev/null 2>&1 || docker pull -q "$IMG" >/dev/null 2>&1 || { echo "Image $IMG indisponible" >&2; exit 2; }
+# Verrou AVANT les contrôles : un autre test (hooks-test, selftest d'un autre dépôt)
+# détruirait le routeur de celui-ci. Ctrl-C / kill passent par EXIT, qui le libère.
+# shellcheck disable=SC1091
+. "$HERE/test-lock.sh"
+testlock_acquire "selftest $(basename "$(cd "$EDGE_DIR/../.." && pwd)")" || exit 2
+trap testlock_release EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
+if docker container inspect mi-kandra-edge >/dev/null 2>&1; then echo "Un routeur mi-kandra-edge existe déjà : test refusé pour ne pas perturber un serveur réel." >&2; exit 2; fi
+if docker ps --format '{{.Ports}}' | grep -Eq ':(80|443)->'; then echo "80/443 sont occupés : test refusé." >&2; exit 2; fi
 
 TMP=$(mktemp -d); TMPN=$(native "$TMP")
 cleanup() {
@@ -91,7 +131,7 @@ cleanup() {
   docker volume rm "$VOL" >/dev/null 2>&1; docker network rm "$NET" >/dev/null 2>&1
   rm -rf "$TMP"
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup; testlock_release' EXIT
 
 echo "== Préparation : certificats et faux projets"
 # openssl reçoit un chemin natif (sous Git Bash, un chemin /tmp/... serait mal interprété).
@@ -122,7 +162,11 @@ start_origin selftest-b b b-origin selftest-b.example.test
 wait_running selftest-a; wait_running selftest-b
 
 echo "== 1) Routeur et enregistrement"
-edge ensure-edge >/dev/null 2>&1; check "routeur démarré et sain" "$(docker inspect -f '{{.State.Health.Status}}' mi-kandra-edge 2>/dev/null)" "healthy"
+# ensure-edge rend la main dès que nginx répond ; Docker le déclare sain dans la
+# foulée (start_interval 1s dans edge-compose.yml) : moins de 5 s exigées.
+edge ensure-edge >/dev/null 2>&1; check "routeur démarré et prêt" "$?" "0"
+hs_t0=$(now_ms); wait_edge_healthy
+check "routeur déclaré sain par Docker en moins de 5 s" "$([ $(( $(now_ms) - hs_t0 )) -lt 5000 ] && docker container inspect -f '{{.State.Health.Status}}' mi-kandra-edge 2>/dev/null)" "healthy"
 edge sync >/dev/null 2>&1; check "sync (code 0)" "$?" "0"
 check "routes a et b enregistrées" "$(docker exec mi-kandra-edge sh -c 'ls /etc/mi-kandra-edge/routes.d/*.tls.map | wc -l' | tr -d ' \r')" "2"
 
@@ -133,6 +177,13 @@ check "HTTPS a -> origin a" "$(body selftest-a.example.test)" "origin-a"
 check "HTTPS b -> origin b" "$(body selftest-b.example.test)" "origin-b"
 check "sous-domaine de a -> a" "$(curl -sk -m 10 --resolve www.selftest-a.example.test:443:127.0.0.1 https://www.selftest-a.example.test/ 2>/dev/null | tr -d '\r\n')" "origin-a"
 check "SNI inconnu refusé" "$(code inconnu.example.test)" "000"
+# Journal du routeur lisible (sh mi-kandra-edge.sh logs) : la connexion routée et
+# le refus ci-dessus y figurent, sans le doublon « connect() failed » d'error_log.
+lg=$(NO_COLOR=1 edge logs --no-follow --tail 100 2>&1)
+check "logs du routeur : connexion routée vers a" "$([ "$(printf '%s\n' "$lg" | grep -c 'selftest-a.example.test .*→ a-origin:8443')" -ge 1 ] && echo oui)" "oui"
+check "logs du routeur : domaine inconnu refusé" "$(printf '%s\n' "$lg" | grep -c 'inconnu.example.test .*refusé (domaine inconnu)')" "1"
+check "logs du routeur : pas de doublon d'erreur du refus" "$(printf '%s\n' "$lg" | grep -c 'connect() failed')" "0"
+check "logs --refused : seulement les refus" "$(NO_COLOR=1 edge logs --no-follow --refused 2>&1 | grep -c '→')" "0"
 
 echo "== 3) Entrées hostiles refusées, routeur intact"
 docker run -d --name selftest-evil --network "$NET" -l org.mi-kandra.role=origin -l org.mi-kandra.project=evil -l org.mi-kandra.origin-alias=evil-origin -l org.mi-kandra.domains=selftest-a.example.test "$IMG" >/dev/null 2>&1
@@ -276,7 +327,13 @@ wait_route selftest-x.example.test "x seul : public en direct"
 check "y sans choix ni terminal : reste local" "$(start_fake y)" "pending"
 check "y sans choix : pas public" "$(body selftest-y.example.test)" "origin-x"
 printf 'MI_KANDRA_EDGE_PREF=cohabit\n' > "$TMP/proj-y/.mi-kandra-edge.pref"
+# x reste servi pendant sa propre conversion, à une courte coupure près : le
+# routeur est créé d'avance et ses routes posées dès qu'il répond.
+probe_start selftest-x.example.test "$TMP/probe-adopt"
 check "y relancé avec « cohabiter » : x converti, y partagé" "$(start_fake y)" "shared"
+wait_route selftest-x.example.test "x via le routeur (sonde)"
+probe_stop "$TMP/probe-adopt"
+check_gap "conversion de x" "$TMP/probe-adopt" "$GAP_MAX"
 check "routeur démarré par la conversion" "$(wait_edge_healthy && echo healthy)" "healthy"
 wait_route selftest-x.example.test "x via le routeur"
 wait_route selftest-y.example.test "y via le routeur"
@@ -329,6 +386,28 @@ check "tenu par ce projet : code 0" "$(MI_KANDRA_COMPOSE_PROJECT=autreprojet edg
 check "même numéro en tcp : libre" "$(edge check-port $TP tcp >/dev/null 2>&1; echo $?)" "0"
 check "argument invalide : code 64" "$(edge check-port abc >/dev/null 2>&1; echo $?)" "64"
 docker rm -f selftest-p53 >/dev/null 2>&1
+
+echo "== 10) Retour au mode autonome (release)"
+check "x seul : mode autonome" "$(start_fake x)" "standalone"
+wait_route selftest-x.example.test "x seul : public en direct"
+printf 'MI_KANDRA_EDGE_PREF=cohabit\n' > "$TMP/proj-y/.mi-kandra-edge.pref"
+check "y arrive : x converti, y partagé" "$(start_fake y)" "shared"
+wait_route selftest-x.example.test "x via le routeur"
+check "deux projets derrière le routeur : release refusé" "$(edge release >/dev/null 2>&1; echo $?)" "1"
+check "release refusé : routeur toujours là" "$(docker container inspect -f '{{.State.Running}}' mi-kandra-edge 2>/dev/null)" "true"
+docker rm -f sy-nginx-1 >/dev/null 2>&1
+probe_start selftest-x.example.test "$TMP/probe-release"
+check "un seul projet : release (code 0)" "$(edge release >/dev/null 2>&1; echo $?)" "0"
+wait_route selftest-x.example.test "x reprend 80/443 en direct"
+probe_stop "$TMP/probe-release"
+check_gap "retour au mode autonome" "$TMP/probe-release" "$GAP_MAX"
+check "routeur retiré" "$(docker container inspect mi-kandra-edge >/dev/null 2>&1 && echo présent || echo absent)" "absent"
+check "volume des routes retiré" "$(docker volume inspect "$VOL" >/dev/null 2>&1 && echo présent || echo absent)" "absent"
+check "réseau partagé conservé (x y reste rattaché)" "$(docker network inspect "$NET" >/dev/null 2>&1 && echo présent || echo absent)" "présent"
+check "x publie de nouveau 80/443" "$(docker port sx-nginx-1 443/tcp 2>/dev/null | grep -c '^0\.0\.0\.0:443$')" "1"
+check "x répond en direct" "$(body selftest-x.example.test)" "origin-x"
+check "release sans routeur : rien à faire (code 0)" "$(edge release >/dev/null 2>&1; echo $?)" "0"
+reset_fakes
 
 echo
 echo "Résultat : $PASS OK, $FAILN FAIL"

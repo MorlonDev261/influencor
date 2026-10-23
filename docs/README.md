@@ -27,6 +27,7 @@ Cette documentation est organisée en deux espaces:
 - [Signature et releases](./developer/release/signing-and-versioning.md)
 - [Publication](./developer/deployment/publishing.md)
 - [Web : app Flutter (retirée de influencor.mi-kandra.org)](./developer/deployment/web-mi-kandra.md)
+- [Page de maintenance Cloudflare](./developer/deployment/page-maintenance-cloudflare.md)
 - [`start.sh` : étapes et commandes](./developer/deployment/start-sh.md)
 - [Comptabilité, tâches et menu](./developer/architecture/accounting-and-tasks.md)
 - [Dépannage développeur](./developer/troubleshooting/README.md)

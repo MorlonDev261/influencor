@@ -26,6 +26,10 @@
 #   health=0      1 = garde aussi les sondes /api/health (masquées par défaut)
 #   scans=0       1 = montre aussi le trafic hors-site (lignes « mk-unmatched »
 #                 du vhost par défaut : scans d'IP, domaines d'autres projets)
+#   all=0         1 = tout, sans rien masquer ni regrouper (routine, scheduler)
+#   routine=regex chemins nginx de routine masqués en succès (défaut : sondage
+#                 /api/notifications) ; avec les checkpoints Postgres et les
+#                 sauvegardes Redis, comptés dans un total en fin d'historique
 #   stacklines=12 lignes de stack trace JSON affichées avant troncature
 #   prefix=poma-  préfixe retiré des noms de conteneurs (container_name)
 #
@@ -39,6 +43,7 @@ BEGIN {
     RED = "\033[91m"; YEL = "\033[93m"; GRN = "\033[92m"; CYN = "\033[96m"; MAG = "\033[95m"
   }
   if (stacklines == "") stacklines = 12
+  if (routine == "") routine = "^/api/notifications([?/]|$)"
   grep = tolower(grep)
   # Une couleur stable par service connu ; les autres prennent la suite.
   SVC_COLOR["app"] = "\033[96m";      SVC_COLOR["nginx"] = "\033[92m"
@@ -215,9 +220,10 @@ function iscont(msg, svc) {
   return PLAIN[svc] && LAST[svc] == "error" && substr(msg, 1, 1) != "{" && textlevel(msg) == "info" && !OWNLVL
 }
 
-# Ligne portant son propre en-tête (Postgres, nginx error_log, Redis, logback).
+# Ligne portant son propre en-tête (Postgres, PgBouncer, nginx error_log, Redis, logback).
 function structured(msg) {
   return msg ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9:.]+ [A-Z]+ \[[0-9]+\] [A-Z]+:/ \
+    || msg ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9:.]+ [A-Z]+ \[[0-9]+\] (LOG|WARNING|ERROR|FATAL|NOISE|DEBUG) / \
     || msg ~ /^[0-9][0-9][0-9][0-9]\/[0-9][0-9]\/[0-9][0-9] [0-9:]+ \[[a-z]+\] / \
     || msg ~ /^[0-9]+:[A-Z] [0-9]+ [A-Za-z]+ [0-9]+ [0-9:.]+ [*#.-] / \
     || msg ~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9][.0-9]* +(TRACE|DEBUG|INFO|WARN|ERROR) /
@@ -281,6 +287,9 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
   nf = split(req, f, " "); method = f[1]; path = (nf >= 2) ? f[2] : req
   split(after, f, " "); status = f[1]; bytes = f[2]
   if (status !~ /^[0-9][0-9][0-9]$/) return 0
+  # Sondage de routine réussi (un onglet ouvert interroge toutes les minutes) :
+  # compté, pas affiché. Un échec du même chemin reste visible.
+  if (!(all + 0) && !UNMATCHED && status < 400 && path ~ routine) { ROUTINE++; SHOWN[SVC] = 0; return 1 }
   if (UNMATCHED && match(msg, /"[^"]*"$/)) {
     host = substr(msg, RSTART + 1, RLENGTH - 2)
     if (host == "" || host == "_") host = "sans domaine"
@@ -296,6 +305,38 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
   return 1
 }
 
+# Routine des bases de données, sans rien à signaler : checkpoints périodiques de
+# Postgres, statistiques de PgBouncer (une ligne par minute, MGA), sauvegardes
+# Redis réussies. Masquée sauf all=1, comptée.
+function isroutine(msg) {
+  if (msg ~ / LOG: +checkpoint (starting|complete): /) return 1
+  if (msg ~ / LOG stats: [0-9]+ xacts\/s, [0-9]+ queries\/s/) return 1
+  if (msg ~ /^[0-9]+:[A-Z] [0-9]+ [A-Za-z]+ [0-9]+ [0-9:.]+ [*.] /) {
+    if (msg ~ /([0-9]+ changes? in [0-9]+ seconds\. Saving\.\.\.|Background saving started by pid|DB saved on disk|Fork CoW for RDB|Background saving terminated with success)/) return 1
+  }
+  return 0
+}
+
+# Scheduler (logfmt « level=info job=X start » puis « … job=X success
+# duration_ms=N ») : une seule ligne par exécution, « ✓ X  N ms ». Le début est
+# absorbé ; un avertissement ou un échec (autre niveau) reste affiché tel quel.
+# Renvoie 1 si la ligne a été traitée.
+function schedline(msg,    job, dur, st) {
+  if (msg !~ /(^|[ \t])level=info([ \t]|$)/) return 0
+  if (!match(msg, /(^|[ \t])job=[A-Za-z0-9_.:-]+/)) return 0
+  job = substr(msg, RSTART, RLENGTH); sub(/.*job=/, "", job)
+  if (job == "-") return 0
+  if (msg ~ /[ \t]start$/) { SHOWN[SVC] = 0; return 1 }
+  if (msg !~ /(^|[ \t])success([ \t]|$)/) return 0
+  LAST[SVC] = "info"; PLAIN[SVC] = 1
+  if (rank("info") < minlevel + 0) { SHOWN[SVC] = 0; return 1 }
+  dur = ""; if (match(msg, /duration_ms=[0-9]+/)) dur = substr(msg, RSTART + 12, RLENGTH - 12)
+  st = ""; if (match(msg, /http_status=[0-9]+/)) st = substr(msg, RSTART + 12, RLENGTH - 12)
+  SHOWN[SVC] = 1
+  emit("info", GRN "✓" R " " job (dur != "" ? GRY "  " dur " ms" R : "") (st != "" && st != "200" ? GRY "  http " st R : ""))
+  return 1
+}
+
 # ── Boucle principale ────────────────────────────────────────────────────────
 
 {
@@ -303,11 +344,15 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
   sub(/\r$/, "", line)
   # Fin de l'historique (ligne posée par logs-view.sh) : bilan du hors-site masqué.
   if (line == "mk-history-end") {
+    if (ROUTINE) {
+      print GRY "… " ROUTINE " ligne(s) de routine masquée(s) : sondage des notifications, checkpoints Postgres, statistiques PgBouncer, sauvegardes Redis (--all pour tout voir)" R
+      ROUTINE = 0
+    }
     if (HIDDEN) {
       print GRY "… " HIDDEN " requête(s) hors-site masquée(s) : scans de l'IP, domaines d'autres projets (--scans pour les voir)" R
       HIDDEN = 0
-      fflush()
     }
+    fflush()
     next
   }
   p = index(line, "| ")
@@ -341,6 +386,7 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
     if (!(scans + 0)) { HIDDEN++; next }
     msg = substr(msg, 14); SVC = "hors-site"; UNMATCHED = 1
   }
+  if (!(all + 0) && isroutine(msg)) { ROUTINE++; next }
 
   # Continuation d'un événement multi-lignes (stack trace, erreur Prisma,
   # DETAIL Postgres…) : même service, même seconde que la ligne précédente.
@@ -361,6 +407,7 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
     next
   }
 
+  if (!(all + 0) && schedline(msg)) next
   if (substr(msg, 1, 1) == "{" && jsonline(msg)) next
   if (nginxaccess(msg)) next
 
@@ -371,6 +418,13 @@ function nginxaccess(msg,    ip, q1, rest, req, after, f, nf, method, path, stat
     word = msg; sub(/:.*/, "", word)
     lvl = (word ~ /^(ERROR|FATAL|PANIC)$/) ? "error" : (word == "WARNING" ? "warn" : "info")
     if (word ~ /^(LOG|ERROR|WARNING|FATAL|PANIC)$/) { msg = substr(msg, length(word) + 2); sub(/^ +/, "", msg) }
+  }
+  # PgBouncer : même en-tête que Postgres, niveau sans « : »
+  # (« 2026-10-20 12:00:00.123 UTC [1] LOG listening on … »).
+  else if (msg ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9:.]+ [A-Z]+ \[[0-9]+\] (LOG|WARNING|ERROR|FATAL|NOISE|DEBUG) /) {
+    sub(/^[0-9-]+ [0-9:.]+ [A-Z]+ \[[0-9]+\] /, "", msg)
+    word = msg; sub(/ .*/, "", word); msg = substr(msg, length(word) + 2)
+    lvl = (word ~ /^(ERROR|FATAL)$/) ? "error" : (word == "WARNING" ? "warn" : "info")
   }
   # nginx error_log : « 2026/10/20 12:00:00 [error] 29#29: *1 … »
   else if (msg ~ /^[0-9][0-9][0-9][0-9]\/[0-9][0-9]\/[0-9][0-9] [0-9:]+ \[[a-z]+\] /) {

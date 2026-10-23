@@ -34,6 +34,15 @@
 #   doctor        Diagnostic complet (code retour ≠ 0 si anomalie).
 #                 --probe : sonde HTTPS réelle de chaque domaine + expiration du
 #                 certificat (à lancer sur le serveur).
+#   release [--force]
+#                 Retour au mode autonome : le routeur s'arrête et le seul projet encore
+#                 en marche reprend 80/443 (coupure de quelques secondes). Refusé si
+#                 plusieurs projets passent par le routeur, sauf --force (les autres
+#                 restent alors en local, non publics).
+#   logs [--since <durée>] [--tail <n>] [--no-follow] [--refused]
+#                 Journal du routeur, lisible : heure locale, domaine demandé → projet,
+#                 statut, octets, IP. --refused : seulement les connexions refusées
+#                 (domaine inconnu) et les projets injoignables.
 #   check-port P [tcp|udp]
 #                 Qui tient le port P de l'hôte ? Code 0 = libre ou tenu par ce projet,
 #                 1 = tenu par le conteneur d'un autre projet, 2 = tenu hors Docker.
@@ -56,6 +65,7 @@ SCRIPT_DIR_NATIVE=$(cd "$SCRIPT_DIR" && pwd -W 2>/dev/null || pwd)
 EDGE_NAME="mi-kandra-edge"
 EDGE_NET="mi-kandra-edge"
 EDGE_ROUTES="/etc/mi-kandra-edge/routes.d"
+EDGE_VOL="mi-kandra-edge-routes"
 
 # Valeurs propres au projet d'abord, valeurs génériques ensuite (ordre important :
 # un défaut posé avant la lecture de project.env le masquerait).
@@ -88,11 +98,11 @@ docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; 
 # "En marche" = réellement up : un conteneur en boucle de redémarrage a
 # State.Running=true par intermittence, il ne doit pas compter comme actif.
 edge_running() {
-  [ "$(docker inspect -f '{{.State.Status}}/{{.State.Restarting}}' "$EDGE_NAME" 2>/dev/null)" = "running/false" ]
+  [ "$(docker container inspect -f '{{.State.Status}}/{{.State.Restarting}}' "$EDGE_NAME" 2>/dev/null)" = "running/false" ]
 }
 
 edge_healthy() {
-  [ "$(docker inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null)" = "healthy" ]
+  [ "$(docker container inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null)" = "healthy" ]
 }
 
 edge_exec() { docker exec -i "$EDGE_NAME" sh -c "$1"; }
@@ -477,21 +487,68 @@ cmd_ensure_edge() {
   # recréer le conteneur et couper 80/443 pour rien). Malade ou absent : on
   # reconverge vers la configuration versionnée.
   if edge_running && edge_healthy; then ok "routeur $EDGE_NAME déjà actif et sain"; return 0; fi
-  if ! docker inspect "$EDGE_NAME" >/dev/null 2>&1; then
+  if ! docker container inspect "$EDGE_NAME" >/dev/null 2>&1; then
     if [ -n "$(port_holders)" ] || external_port_holder; then
       fail "80/443 sont occupés ($(port_holders | cut -d'|' -f1 | tr '\n' ' ')) : lancez d'abord 'adopt'."
       return 1
     fi
   fi
   ensure_network || { fail "création du réseau $EDGE_NET impossible"; return 1; }
-  docker compose -f "$SCRIPT_DIR_NATIVE/edge-compose.yml" up -d >&2 || { fail "démarrage du routeur impossible"; return 1; }
+  if [ "${EDGE_PRECREATED:-0}" = "1" ] && ! edge_running; then
+    # Créé à l'instant par edge_precreate, depuis la configuration versionnée :
+    # un simple démarrage, sans les secondes de `docker compose up`.
+    docker start "$EDGE_NAME" >/dev/null 2>&1 || { fail "démarrage du routeur impossible"; return 1; }
+  else
+    docker compose -f "$SCRIPT_DIR_NATIVE/edge-compose.yml" up -d >&2 || { fail "démarrage du routeur impossible"; return 1; }
+  fi
+  # Prêt dès que nginx répond, sans attendre le statut « healthy » de Docker :
+  # chaque seconde passée ici, le routeur tient déjà 80/443 sans aucune route
+  # (connexions refusées, erreur 525 côté Cloudflare). L'appelant enregistre
+  # les routes aussitôt après.
   i=0
-  while [ "$i" -lt 30 ]; do
-    [ "$(docker inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null)" = "healthy" ] && { ok "routeur $EDGE_NAME sain"; return 0; }
-    i=$((i + 1)); sleep 1
+  while [ "$i" -lt 150 ]; do
+    edge_answers && { ok "routeur $EDGE_NAME prêt"; return 0; }
+    i=$((i + 1)); sleep 0.2
   done
-  fail "le routeur n'est pas devenu sain en 30 s (docker logs $EDGE_NAME)"
+  fail "le routeur ne répond pas après 30 s (docker logs $EDGE_NAME)"
   return 1
+}
+
+# Routeur démarré ET nginx qui répond sur sa sonde interne.
+edge_answers() {
+  edge_running && docker exec "$EDGE_NAME" wget -q -O /dev/null http://127.0.0.1/__mi_kandra_edge_health >/dev/null 2>&1
+}
+
+# Crée le conteneur du routeur SANS le démarrer (image prête, aucun port pris) :
+# au moment où les voisins libèrent 80/443, il ne reste qu'à le lancer.
+edge_precreate() {
+  docker container inspect "$EDGE_NAME" >/dev/null 2>&1 && return 0
+  ensure_network || return 1
+  docker compose -f "$SCRIPT_DIR_NATIVE/edge-compose.yml" up --no-start >&2 2>&1 || return 1
+  EDGE_PRECREATED=1
+}
+
+# Pose les routes d'un origin dans le volume du routeur AVANT son démarrage :
+# il prend 80/443 avec ses routes déjà en place, au lieu de refuser le trafic
+# (525) le temps de l'enregistrement. Mêmes lignes que write_routes, qui les
+# revalide ensuite au `sync` (« routes déjà à jour »). Code ≠ 0 : rien d'écrit,
+# le `sync` habituel prendra le relais.
+seed_routes() { # $1 = conteneur origin
+  sr_project=$(label "$1" org.mi-kandra.project); sr_alias=$(label "$1" org.mi-kandra.origin-alias)
+  is_project "$sr_project" && is_alias "$sr_alias" || return 1
+  sr_tls=""; sr_http=""
+  for sr_d in $(origin_domains "$1" 2>/dev/null); do
+    sr_d=${sr_d#\*.}; sr_d=${sr_d#.}
+    is_domain "$sr_d" || return 1
+    sr_tls="${sr_tls}.${sr_d} ${sr_alias}:8443;
+"
+    sr_http="${sr_http}.${sr_d} ${sr_alias}:8080;
+"
+  done
+  [ -n "$sr_tls" ] || return 1
+  sr_img=$(docker container inspect -f '{{.Config.Image}}' "$EDGE_NAME" 2>/dev/null) || return 1
+  printf '%s\n' "$sr_tls" | docker run --rm -i -v "$EDGE_VOL:/r" --entrypoint sh "$sr_img" -c "cat > /r/$sr_project.tls.map" \
+    && printf '%s\n' "$sr_http" | docker run --rm -i -v "$EDGE_VOL:/r" --entrypoint sh "$sr_img" -c "cat > /r/$sr_project.http.map"
 }
 
 # Met à jour UN voisin trop ancien pour être converti (nginx sans labels Mi Kandra) : git pull dans son
@@ -622,6 +679,15 @@ cmd_adopt() {
   fi
 
   ensure_network || { fail "création du réseau $EDGE_NET impossible"; return 1; }
+  # Routeur créé (image prête, aucun port pris) AVANT de toucher aux voisins : entre
+  # le moment où ils libèrent 80/443 et celui où le routeur les prend, il ne reste
+  # que son démarrage. Un échec ici n'a encore rien changé.
+  edge_precreate || { fail "création du routeur impossible : aucun projet n'a été modifié"; return 1; }
+  if [ "${EDGE_PRECREATED:-0}" = "1" ]; then
+    for n in $(echo "$holders" | cut -d'|' -f1); do
+      seed_routes "$n" || warn "$n : routes non posées d'avance (enregistrées au démarrage du routeur)"
+    done
+  fi
   # Voisins déjà convertis (« projet|dossier|fichiers|service|pref créée ») : en cas
   # d'échec, adopt_rollback leur rend 80/443 au lieu de laisser le serveur sans
   # personne pour répondre.
@@ -660,7 +726,7 @@ cmd_adopt() {
   done
   cmd_ensure_edge || { adopt_rollback "$converted"; return 1; }
   [ -n "$(pref_get)" ] || pref_set cohabit
-  sleep 2
+  # Aussitôt : chaque seconde sans route, le routeur refuse le trafic (525).
   cmd_sync
 }
 
@@ -669,7 +735,7 @@ cmd_status() {
   docker_ok || { fail "Docker indisponible."; return 1; }
   say "Projet courant : ${MI_KANDRA_PROJECT:-?}   mode : $(decide_mode)"
   if edge_running; then
-    ok "routeur : actif ($(docker inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null))"
+    ok "routeur : actif ($(docker container inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null))"
     edge_exec "for f in $EDGE_ROUTES/*.tls.map; do [ -f \"\$f\" ] && { echo \"  -- \$(basename \$f .tls.map)\"; sed 's/^/     /' \"\$f\"; }; done; true" >&2
   else
     say "routeur : absent"
@@ -725,7 +791,7 @@ cmd_doctor() {
 
   if [ "$mode" = "pending" ]; then fail "80/443 occupés par un voisin non converti → sh scripts/edge/mi-kandra-edge.sh adopt"; rc=1; fi
   if edge_running; then
-    [ "$(docker inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null)" = "healthy" ] \
+    [ "$(docker container inspect -f '{{.State.Health.Status}}' "$EDGE_NAME" 2>/dev/null)" = "healthy" ] \
       && ok "routeur sain" || { fail "routeur non sain"; rc=1; }
     docker exec "$EDGE_NAME" nginx -t >/dev/null 2>&1 && ok "configuration du routeur valide" || { fail "nginx -t du routeur en échec"; rc=1; }
     for c in $origins; do
@@ -762,6 +828,117 @@ cmd_doctor() {
   dup=$(for c in $origins; do origin_domains "$c"; echo; done | tr ' ' '\n' | sed 's/^\*\.//;s/^\.//' | grep . | sort | uniq -d)
   [ -z "$dup" ] && ok "aucun domaine revendiqué par deux projets" || { fail "domaines en double : $dup"; rc=1; }
   return $rc
+}
+
+# ── Retour au mode autonome ──────────────────────────────────────────────────
+# Inverse d'adopt. Le réseau partagé est gardé (le nginx du projet y est
+# rattaché) ; le volume des routes n'est retiré qu'une fois 80/443 repris. En
+# cas d'échec, le routeur est relancé avec ses routes : le site reste servi.
+cmd_release() {
+  rl_force=0; [ "${1:-}" = "--force" ] && rl_force=1
+  docker_ok || { fail "Docker indisponible."; return 1; }
+  docker container inspect "$EDGE_NAME" >/dev/null 2>&1 || { ok "aucun routeur : déjà en mode autonome"; return 0; }
+  rl_origins=$(list_origins)
+  rl_n=$(printf '%s\n' "$rl_origins" | grep -c .)
+  if [ "$rl_n" -gt 1 ] && [ "$rl_force" -ne 1 ]; then
+    fail "$rl_n projets passent par le routeur ($(printf '%s ' $rl_origins)) : un seul peut reprendre 80/443."
+    say "Arrêtez d'abord les autres projets, ou : sh scripts/edge/mi-kandra-edge.sh release --force (seul $(printf '%s\n' "$rl_origins" | head -1) redeviendra public)."
+    return 1
+  fi
+  rl_ctr=$(printf '%s\n' "$rl_origins" | head -1)
+  if [ -z "$rl_ctr" ]; then
+    docker rm -f "$EDGE_NAME" >/dev/null 2>&1
+    docker volume rm "$EDGE_VOL" >/dev/null 2>&1
+    ok "aucun projet en marche : routeur retiré"
+    return 0
+  fi
+  rl_proj=$(label "$rl_ctr" com.docker.compose.project)
+  rl_wd=$(label "$rl_ctr" com.docker.compose.project.working_dir)
+  rl_cfg=$(label "$rl_ctr" com.docker.compose.project.config_files)
+  rl_svc=$(label "$rl_ctr" com.docker.compose.service)
+  [ -n "$rl_proj" ] && [ -n "$rl_wd" ] && [ -n "$rl_cfg" ] && [ -n "$rl_svc" ] \
+    || { fail "$rl_ctr : labels Compose incomplets, recréation impossible — rien n'a été modifié"; return 1; }
+  set --
+  rl_ifs=$IFS; IFS=','; for f in $rl_cfg; do set -- "$@" -f "$f"; done; IFS=$rl_ifs
+  say "Retour au mode autonome : $rl_ctr ($rl_proj/$rl_svc) reprend 80/443 …"
+  # Routeur ET ancien nginx arrêtés ensemble, 1 s chacun au plus : nginx
+  # s'arrête en douceur (SIGQUIT) et attendrait la fin de ses connexions
+  # longues — mesuré en production : ~10 s sans personne sur 80/443 quand la
+  # recréation arrêtait elle-même l'ancien conteneur, une fois le routeur coupé.
+  docker stop -t 1 "$EDGE_NAME" "$rl_ctr" >/dev/null 2>&1
+  if ! ( cd "$rl_wd" && unset MI_KANDRA_HTTP_PUBLISH MI_KANDRA_HTTPS_PUBLISH \
+         && docker compose -p "$rl_proj" "$@" up -d --no-deps --force-recreate "$rl_svc" >&2 </dev/null ); then
+    fail "$rl_ctr : recréation sur 80/443 impossible — routeur relancé ; si le site ne répond pas, relancez la stack : cd '$rl_wd' && ./start.sh"
+    docker start "$rl_ctr" "$EDGE_NAME" >/dev/null 2>&1
+    return 1
+  fi
+  docker rm -f "$EDGE_NAME" >/dev/null 2>&1
+  docker volume rm "$EDGE_VOL" >/dev/null 2>&1
+  [ "$rl_n" -gt 1 ] && warn "projets restés en local (non publics) : $(printf '%s\n' "$rl_origins" | tail -n +2 | tr '\n' ' ')"
+  ok "$rl_proj : 80/443 repris, routeur retiré (mode autonome)"
+}
+
+# ── Journal du routeur ───────────────────────────────────────────────────────
+# Le routeur n'apparaît dans le --logs d'aucun projet. Lignes d'origine (format
+# mi_kandra_tls d'edge-nginx.conf) : « IP [date] sni=… backend=… status=… sent=…
+# recv=… ». backend=127.0.0.1:9 = domaine inconnu, refusé exprès : son erreur
+# « connect() failed » côté error_log est un doublon, masqué.
+cmd_logs() {
+  lg_follow=1; lg_since=""; lg_tail=200; lg_ref=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --since) [ -n "${2:-}" ] || { fail "--since requiert une durée (ex. 10m, 2h)"; return 64; }; lg_since=$2; shift 2 ;;
+      --tail) printf '%s' "${2:-}" | grep -Eq '^[0-9]+$' || { fail "--tail requiert un nombre"; return 64; }; lg_tail=$2; shift 2 ;;
+      --no-follow) lg_follow=0; shift ;;
+      --refused) lg_ref=1; shift ;;
+      *) fail "logs : option inconnue « $1 » (--since, --tail, --no-follow, --refused)"; return 64 ;;
+    esac
+  done
+  docker_ok || { fail "Docker indisponible."; return 1; }
+  docker container inspect "$EDGE_NAME" >/dev/null 2>&1 || { ok "aucun routeur : mode autonome, chaque projet a ses propres logs (./start.sh --logs)"; return 0; }
+  set -- logs --timestamps
+  if [ -n "$lg_since" ]; then set -- "$@" --since "$lg_since"; else set -- "$@" --tail "$lg_tail"; fi
+  [ "$lg_follow" -eq 1 ] && set -- "$@" -f
+  lg_color=0; [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && lg_color=1
+  docker "$@" "$EDGE_NAME" 2>&1 | awk -v color="$lg_color" -v refused="$lg_ref" -v z="$(date +%z 2>/dev/null)" '
+    BEGIN {
+      if (color + 0) { R = "\033[0m"; B = "\033[1m"; GRY = "\033[90m"; RED = "\033[91m"; YEL = "\033[93m"; GRN = "\033[92m" }
+      off = 0
+      if (z ~ /^[+-][0-9][0-9][0-9][0-9]$/) { off = substr(z, 2, 2) * 3600 + substr(z, 4, 2) * 60; if (substr(z, 1, 1) == "-") off = -off }
+    }
+    function clock(ts,    t) {
+      t = (substr(ts, 12, 2) * 3600 + substr(ts, 15, 2) * 60 + substr(ts, 18, 2) + off) % 86400
+      if (t < 0) t += 86400
+      return sprintf("%02d:%02d:%02d", int(t / 3600), int(t % 3600 / 60), t % 60)
+    }
+    function human(b) { b += 0; if (b < 1024) return b "B"; if (b < 1048576) return sprintf("%.1fk", b / 1024); return sprintf("%.1fM", b / 1048576) }
+    function kv(k,    i) { i = index(msg, " " k "="); if (!i) return ""; v = substr(msg, i + length(k) + 2); sub(/ .*/, "", v); return v }
+    function pad(s, n) { while (length(s) < n) s = s " "; return s }
+    {
+      ts = $1; msg = substr($0, length($1) + 2)
+      if (ts !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) { ts = ""; msg = $0 }
+      t = (ts == "") ? "        " : clock(ts)
+      if (msg ~ / sni=/ && msg ~ / backend=/) {
+        ip = msg; sub(/ .*/, "", ip)
+        sni = kv("sni"); be = kv("backend"); st = kv("status")
+        if (sni == "") sni = "(sans SNI)"
+        if (be == "127.0.0.1:9") {
+          print GRY t R "  " YEL pad(sni, 32) R " " YEL "✗ refusé (domaine inconnu)" R "  " GRY ip R; n_ref++
+        } else if (st != "200") {
+          print GRY t R "  " RED pad(sni, 32) R " " RED "✗ " be " injoignable (" st ")" R "  " GRY ip R; n_ko++
+        } else {
+          n_ok++
+          if (!(refused + 0)) print GRY t R "  " pad(sni, 32) " " GRN "→" R " " pad(be, 24) " " GRY human(kv("sent")) " / " human(kv("recv")) "  " ip R
+        }
+        fflush(); next
+      }
+      # error_log de nginx : le refus volontaire (port 9) est déjà affiché ci-dessus.
+      if (msg ~ /upstream: "127\.0\.0\.1:9"/ || msg ~ /127\.0\.0\.1:9[^0-9]/) next
+      if (refused + 0 && msg !~ /\[(error|crit|alert|emerg)\]/) next
+      lvl = (msg ~ /\[(error|crit|alert|emerg)\]/) ? RED B "ERR " R : (msg ~ /\[warn\]/ ? YEL B "WARN" R : GRY "info" R)
+      print GRY t R "  " lvl "  " msg; fflush()
+    }
+    END { if (n_ok + n_ref + n_ko) print GRY "… " n_ok " connexion(s) routée(s), " n_ref " refusée(s), " n_ko " vers un projet injoignable" R }'
 }
 
 # ── Ports fixes de l'hôte ────────────────────────────────────────────────────
@@ -811,6 +988,8 @@ case "$cmd" in
   adopt)       cmd_adopt "$@" ;;
   choose)      cmd_choose "$@" ;;
   doctor)      cmd_doctor "$@" ;;
+  release)     cmd_release "$@" ;;
+  logs)        cmd_logs "$@" ;;
   check-port)  cmd_check_port "$@" ;;
   # Aide : tout l'en-tête, jusqu'à la ligne de « = » qui le ferme.
   *) awk 'NR > 2 && /^# =+$/ { exit } NR > 2' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;

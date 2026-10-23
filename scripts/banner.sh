@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.." || exit 0
 # RVB exact (24 bits) ; console Linux ou terminal minimal : approximation 256 couleurs.
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   E=$(printf '\033')
-  R="$E[0m"; BOLD="$E[1m"
+  R="${E}[0m"; BOLD="${E}[1m"
   case "${TERM:-}" in
     linux|vt*|ansi|cons25)
       rgb() { printf '%s[%s38;5;%sm' "$E" "$1" "$5"; } ;;

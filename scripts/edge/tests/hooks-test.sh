@@ -8,6 +8,7 @@
 # introuvable). Vérifie surtout que le projet peut TOUJOURS démarrer seul.
 #
 # Sûr : refuse de tourner si un routeur existe ou si 80/443 sont occupés.
+# Attend (verrou tests/test-lock.sh) qu'un autre test du routeur ait fini.
 # Usage : bash scripts/edge/tests/hooks-test.sh      (depuis n'importe où)
 # Code retour : 0 tout passe, 1 échec, 2 prérequis absents.
 # =============================================================================
@@ -26,9 +27,15 @@ native() { (cd "$1" && { pwd -W 2>/dev/null || pwd; }); }
 if grep -q '^mi_kandra_edge_prepare()' "$ROOT/start.sh" 2>/dev/null; then SRC=start.sh; else SRC=init-letsencrypt.sh; fi
 
 command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { echo "Docker indisponible" >&2; exit 2; }
-if docker inspect mi-kandra-edge >/dev/null 2>&1; then echo "Un routeur mi-kandra-edge existe déjà : test refusé." >&2; exit 2; fi
-if docker ps --format '{{.Ports}}' | grep -Eq ':(80|443)->'; then echo "80/443 sont occupés : test refusé." >&2; exit 2; fi
 IMG="nginx:1.27.5-alpine"; docker image inspect "$IMG" >/dev/null 2>&1 || docker pull -q "$IMG" >/dev/null 2>&1 || { echo "Image $IMG indisponible" >&2; exit 2; }
+# Verrou AVANT les contrôles : un autre test (selftest, hooks-test d'un autre dépôt)
+# détruirait le routeur de celui-ci. Ctrl-C / kill passent par EXIT, qui le libère.
+# shellcheck disable=SC1091
+. "$HERE/test-lock.sh"
+testlock_acquire "hooks-test $PROJ" || exit 2
+trap testlock_release EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
+if docker container inspect mi-kandra-edge >/dev/null 2>&1; then echo "Un routeur mi-kandra-edge existe déjà : test refusé." >&2; exit 2; fi
+if docker ps --format '{{.Ports}}' | grep -Eq ':(80|443)->'; then echo "80/443 sont occupés : test refusé." >&2; exit 2; fi
 
 PASS=0; FAILN=0
 # Attend (max 30 s) qu'un conteneur soit en marche : pas de « sleep N » fixe, trop court
@@ -49,7 +56,7 @@ cleanup() {
   rm -f "$HOOKS"
 }
 HOOKS=$(mktemp)
-trap cleanup EXIT INT TERM
+trap 'cleanup; testlock_release' EXIT
 
 # --- extraction du code réel
 if [ "$SRC" = "start.sh" ]; then

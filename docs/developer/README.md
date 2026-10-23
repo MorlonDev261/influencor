@@ -21,6 +21,7 @@ préparer des releases.
 - [Publier sur l'App Store — de A à Z](./release/app-store.md)
 - [Publication](./deployment/publishing.md)
 - [Web : app Flutter (retirée de influencor.mi-kandra.org)](./deployment/web-mi-kandra.md)
+- [Page de maintenance Cloudflare](./deployment/page-maintenance-cloudflare.md)
 - [`start.sh` : étapes et commandes](./deployment/start-sh.md)
 - [Comptabilité, tâches et menu](./architecture/accounting-and-tasks.md)
 - [Degany, l'assistant IA (agent)](./architecture/assistant.md)

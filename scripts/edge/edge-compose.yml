@@ -51,7 +51,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      # Au démarrage, une sonde par seconde (au lieu d'attendre 15 s) : le routeur
+      # est déclaré sain dès qu'il répond. Docker >= 25.
+      start_period: 20s
+      start_interval: 1s
+    # nginx s'arrête par SIGQUIT (arrêt en douceur) et attendrait la fin des
+    # connexions longues (proxy_timeout 1h, WebSocket) : Docker le tuait au bout
+    # de 10 s, autant de secondes sans personne sur 80/443 lors d'un retour au
+    # mode autonome ou d'une recréation du routeur.
+    stop_grace_period: 2s
 
 volumes:
   mi-kandra-edge-routes:

@@ -49,5 +49,38 @@ sh scripts/edge/mi-kandra-cfips.sh update          # plages IP Cloudflare à jou
 sh scripts/edge/mi-kandra-audit.sh
 ```
 
+## Logs
+
+`./start.sh --logs` ne montre que le trafic de ce projet, mis en forme par `scripts/logs-view.sh`
+et `scripts/logs-pretty.awk` (copies identiques dans chaque projet) :
+
+- le trafic qui ne vise aucun de ses domaines (scanners, domaine d'un voisin dont le DNS pointe
+  déjà ici) est marqué `mk-unmatched`, masqué et compté à la fin ; `--logs --scans` le montre ;
+- la routine (sondages réussis, sauvegardes…) est masquée avec un total ; `--logs --all` montre tout ;
+- les scans du vrai domaine (`/.env`, `/phpinfo`, `wp-*`…) sont coupés par nginx avant le site,
+  sans journal (`nginx/snippets/mi-kandra-scan-block.conf`).
+
+Journal du routeur partagé : `sh scripts/edge/mi-kandra-edge.sh logs` (`--since 1h`,
+`--no-follow`, `--refused` pour les domaines inconnus et les projets injoignables).
+
+## Tests du routeur
+
+```bash
+sh scripts/edge/tests/selftest.sh       # vrai routeur + faux projets jetables (HORS production : refuse si 80/443 sont pris)
+bash scripts/edge/tests/hooks-test.sh   # vrai code de cohabitation de start.sh
+sh scripts/edge/tests/lock-test.sh      # verrou entre les deux tests ci-dessus
+```
+
+Les deux premiers détruisent le routeur à la fin : un verrou partagé (`tests/test-lock.sh`,
+conteneur jamais démarré `mi-kandra-edge-testlock`) les empêche de tourner en même temps, même
+depuis deux dépôts. Le second attend (`MI_KANDRA_TEST_LOCK_WAIT`, 900 s par défaut ; 0 = refus
+immédiat, code 2).
+
+## Page de maintenance
+
+Quand le serveur ne répond pas, un Worker Cloudflare partagé affiche une page aux couleurs
+d'Influencor à la place de l'erreur 521 : voir [page-maintenance-cloudflare.md](./page-maintenance-cloudflare.md).
+Elle ne s'applique que si l'app web est en ligne sur un `INFLUENCOR_DOMAIN` en nuage orange.
+
 Voir aussi la documentation Mi Kandra de `poma-original`
 (`docs/07-deployment/mi-kandra-multi-stack.md`, `dns-cloudflare-registrar.md`).

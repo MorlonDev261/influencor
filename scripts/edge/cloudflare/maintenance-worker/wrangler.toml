@@ -1,0 +1,17 @@
+# Déploiement : npx wrangler@4 deploy   (depuis ce dossier, après npx wrangler@4 login)
+# Un SEUL Worker pour tous les projets Mi Kandra. Les domaines en « DNS only »
+# (nuage gris) ne passent pas par Cloudflare : le Worker n'y voit rien.
+name = "mi-kandra-maintenance"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+preview_urls = false
+
+routes = [
+  { pattern = "poma-original.com/*", zone_name = "poma-original.com" },
+  { pattern = "*.poma-original.com/*", zone_name = "poma-original.com" },
+  { pattern = "mga-follow-up.com/*", zone_name = "mga-follow-up.com" },
+  { pattern = "*.mga-follow-up.com/*", zone_name = "mga-follow-up.com" },
+  { pattern = "mi-kandra.org/*", zone_name = "mi-kandra.org" },
+  { pattern = "*.mi-kandra.org/*", zone_name = "mi-kandra.org" },
+]
