@@ -261,8 +261,15 @@ l'Info.plist.
 2. L'app apparaît sur l'App Store sous quelques heures :
    `https://apps.apple.com/app/id<APPLE_ID>` (Apple ID numérique visible dans
    App Store Connect → Informations sur l'app).
-3. Ajouter le bouton App Store sur le site vitrine (dépôt `influencor-web`,
-   section téléchargements : aujourd'hui seulement Android et Windows).
+3. Ajouter le bouton App Store sur le site vitrine. Sur le serveur du site
+   (dépôt `influencor-web`) :
+
+   ```bash
+   ./start.sh --app-store on 'https://apps.apple.com/app/id<APPLE_ID>'
+   ```
+
+   Le site affiche alors un bouton « App Store » et une carte iPhone/iPad à
+   côté d'Android et Windows (`./start.sh --app-store off` pour les retirer).
 
 ## N. Mettre à jour l'application
 
