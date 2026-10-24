@@ -1,0 +1,38 @@
+# Analyse et tests à chaque push et pull request.
+# Runner Windows : comme le poste de dev, et test/secure_storage_windows_test.dart
+# a besoin de DPAPI (Windows uniquement).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-test:
+    name: Analyse et tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Même version que le poste de dev et codemagic.yaml.
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Dépendances
+        run: flutter pub get
+
+      - name: Analyse
+        run: flutter analyze
+
+      - name: Tests
+        run: flutter test
