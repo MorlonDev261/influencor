@@ -653,6 +653,162 @@ class _ToolActivityState extends ConsumerState<ToolActivity> {
   }
 }
 
+/// A finished stretch of work — several actions, with the reasoning between
+/// them — folded to one line, like the reasoning:
+///
+///     ● 4 actions · 12 s ›
+///       ⎿  Recherche, Lire la note, Créer une note
+///
+/// Tap to unfold every step. While the agent is still on it ([live]), the
+/// steps show one under the other as they happen.
+class ToolGroup extends ConsumerStatefulWidget {
+  const ToolGroup({required this.items, required this.live, super.key});
+
+  /// Actions and reasoning blocks, in order.
+  final List<ChatItem> items;
+  final bool live;
+
+  @override
+  ConsumerState<ToolGroup> createState() => _ToolGroupState();
+}
+
+class _ToolGroupState extends ConsumerState<ToolGroup> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.items;
+    final steps = [
+      for (final (i, item) in items.indexed)
+        if (item.kind == ChatItemKind.thinking)
+          ThinkingBlock(key: ValueKey('step-$i'), item: item)
+        else if (!silentTools.contains(item.toolName))
+          ToolActivity(key: ValueKey('step-$i'), item: item),
+    ];
+    if (widget.live) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: steps,
+      );
+    }
+
+    final strings = ref.watch(appStringsProvider);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final muted = scheme.onSurfaceVariant;
+    final tools = [
+      for (final item in items)
+        if (item.kind == ChatItemKind.tool &&
+            !silentTools.contains(item.toolName))
+          item,
+    ];
+    final failed = tools.any((t) => t.status == ToolStatus.failed);
+    final allDenied = tools.every((t) => t.status == ToolStatus.denied);
+    final dot = failed
+        ? scheme.error
+        : allDenied
+            ? muted
+            : const Color(0xFF2E9E5B);
+    final started = items.map((i) => i.startedAt).nonNulls.firstOrNull;
+    final ended = items
+        .map((i) => i.endedAt)
+        .nonNulls
+        .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a);
+    final elapsed =
+        started != null && ended != null ? ended.difference(started) : null;
+    final labels = {for (final t in tools) t.text}.join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _PlainTap(
+            onTap: () => setState(() => _open = !_open),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('●', style: TextStyle(color: dot, fontSize: 13)),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text.rich(
+                        TextSpan(children: [
+                          TextSpan(
+                            text: strings.toolActions(tools.length),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          if (elapsed != null && elapsed.inMilliseconds >= 1000)
+                            TextSpan(
+                              text: '  ·  ${_seconds(elapsed)}',
+                              style: TextStyle(color: muted),
+                            ),
+                        ]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                    Icon(_open ? Icons.expand_less : Icons.chevron_right,
+                        size: 16, color: muted),
+                  ],
+                ),
+                if (!_open && labels.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6, top: 1),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // The "⎿" elbow, drawn (see ToolActivity).
+                        Container(
+                          width: 9,
+                          height: 9,
+                          margin:
+                              const EdgeInsets.only(left: 2, top: 2, right: 8),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: BorderSide(color: muted, width: 1.2),
+                              bottom: BorderSide(color: muted, width: 1.2),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            labels,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: muted),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (_open)
+            Container(
+              margin: const EdgeInsets.only(left: 6, top: 4, bottom: 2),
+              padding: const EdgeInsets.only(left: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                      color: muted.withValues(alpha: 0.35), width: 2),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: steps,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// "✻ Je travaille… (12 s)" while the agent waits for the model or writes an
 /// action; the glyph cycles like a coding agent's spinner.
 class ActivityLine extends ConsumerStatefulWidget {

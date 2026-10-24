@@ -15,7 +15,7 @@ import '../domain/library_entry.dart';
 
 /// What an `index.note` / `index.img` folder opens: every note (or image) of
 /// [dir] and of all its sub-folders, however deep, in one flat list.
-class IndexScreen extends ConsumerWidget {
+class IndexScreen extends ConsumerStatefulWidget {
   const IndexScreen({required this.dir, required this.images, super.key});
 
   /// The folder the index folder sits in (the scope of the listing).
@@ -24,14 +24,34 @@ class IndexScreen extends ConsumerWidget {
   /// true for `index.img` (image grid), false for `index.note` (note list).
   final bool images;
 
+  @override
+  ConsumerState<IndexScreen> createState() => _IndexScreenState();
+}
+
+class _IndexScreenState extends ConsumerState<IndexScreen> {
+  String get dir => widget.dir;
+  bool get images => widget.images;
+
+  @override
+  void initState() {
+    super.initState();
+    // The recursive listing is cached and, on Android / iOS, does not watch
+    // the disk: re-read it so files added from outside the app show up.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.invalidate(dirRecursiveProvider(dir));
+    });
+  }
+
+  Future<void> _refresh() => ref.refresh(dirRecursiveProvider(dir).future);
+
   /// Where [e] lives, relative to [dir] ("" when right here).
   String _location(LibraryEntry e) {
     final rel = p.relative(p.dirname(e.path), from: dir);
-    return rel == '.' ? '' : rel.replaceAll(r'\', ' / ');
+    return rel == '.' ? '' : p.split(rel).join(' / ');
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final strings = ref.watch(appStringsProvider);
     final sort = ref.watch(browseSortProvider);
     final listing = ref.watch(dirRecursiveProvider(dir));
@@ -50,6 +70,13 @@ class IndexScreen extends ConsumerWidget {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: strings.refresh,
+            icon: const Icon(Icons.refresh),
+            onPressed: _refresh,
+          ),
+        ],
       ),
       body: listing.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -57,15 +84,34 @@ class IndexScreen extends ConsumerWidget {
         data: (all) {
           final items = indexedEntries(all, kind, sort);
           if (items.isEmpty) {
-            return EmptyState(
-              icon: images ? Icons.image_outlined : Icons.description_outlined,
-              title: images ? strings.indexAllImages : strings.indexAllNotes,
-              message: strings.indexEmpty,
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: SizedBox(
+                    height: constraints.maxHeight,
+                    child: EmptyState(
+                      icon: images
+                          ? Icons.image_outlined
+                          : Icons.description_outlined,
+                      title: images
+                          ? strings.indexAllImages
+                          : strings.indexAllNotes,
+                      message: strings.indexEmpty,
+                    ),
+                  ),
+                ),
+              ),
             );
           }
-          return images
-              ? _ImageGrid(items: items, location: _location)
-              : _NoteList(items: items, location: _location, strings: strings);
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: images
+                ? _ImageGrid(items: items, location: _location)
+                : _NoteList(
+                    items: items, location: _location, strings: strings),
+          );
         },
       ),
     );

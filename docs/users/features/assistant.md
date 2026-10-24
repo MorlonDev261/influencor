@@ -14,7 +14,8 @@ nettoie vos photos avec Deganeo, gère vos tâches et votre comptabilité.
    ou « Autre » (tout service compatible OpenAI).
 3. Collez votre clé API (bouton « Obtenir une clé »), choisissez un modèle
    (bouton nuage : liste les modèles de votre compte).
-4. **Tester la connexion**.
+4. **Enregistrer** (les réglages s'enregistrent aussi tout seuls pendant la
+   saisie), puis **Tester la connexion**.
 
 La clé reste sur votre appareil, dans le coffre sécurisé du système. Vos messages et les données que l'assistant
 lit pour répondre sont envoyés au fournisseur choisi.
@@ -37,9 +38,33 @@ La réponse s'écrit mot à mot. Pendant le travail, vous voyez :
 - **● Action(…)** : chaque action réalisée (point vert = réussie, rouge =
   échec), avec son résultat en dessous. Touchez une action pour voir le
   détail exact.
+- Une fois une étape de travail terminée, ses actions (et la réflexion entre
+  elles) se replient en une ligne, comme la réflexion :
+  **● 4 actions · 12 s**, avec leurs noms en dessous. Touchez-la pour revoir
+  chaque action.
 
 Les fichiers cités apparaissent comme des boutons : appui = ouvrir, appui long =
 copier le chemin. Touchez une ligne d'outil pour voir ce qui a été fait.
+
+## Mémoire de Degany
+
+Degany retient au fil des conversations ce qu'il apprend sur vous : nom,
+activité, marque, domaine, public visé, pages Facebook / Instagram / TikTok…,
+site, e-mail, numéros, ton d'écriture préféré, et ce qu'il trouve dans vos
+propres contenus (signature, bio). Il s'en sert sans le répéter : il vous
+appelle par votre nom, met vos liens dans vos légendes, et répond à
+« quelle est ma page Facebook ? » (sinon il la cherche dans votre
+bibliothèque).
+
+- Cette mémoire reste sur votre appareil, chiffrée dans le coffre sécurisé
+  du système ; seule l'application peut la lire. Elle accompagne vos
+  messages vers le fournisseur d'IA choisi, comme le reste de la
+  conversation.
+- Degany n'y garde jamais de mot de passe, code PIN ou mobile money, numéro
+  de carte ni clé API.
+- Demandez-lui « que sais-tu de moi ? » pour la voir.
+- Réglages de l'assistant → **Mémoire de Degany** : désactiver, ou
+  **Effacer la mémoire**. « Nouvelle conversation » ne l'efface pas.
 
 ## Nettoyer des photos avec l'assistant
 

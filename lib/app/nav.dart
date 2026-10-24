@@ -16,11 +16,15 @@ String newNoteRoute(String dir) =>
 /// Route a folder entry opens: its listing, or for an `index.note` /
 /// `index.img` folder the flat list of every note / image of its parent folder
 /// and sub-folders.
-String folderRoute(LibraryEntry folder) {
-  final index = indexKindOf(folder);
-  if (index == null) return browseRoute(folder.path);
+String folderRoute(LibraryEntry folder) => directoryRoute(folder.path);
+
+/// [folderRoute] for a folder known by its path only (the assistant's links).
+String directoryRoute(String path) {
+  final dir = p.normalize(path);
+  final index = indexKindOfFolderName(p.basename(dir));
+  if (index == null) return browseRoute(path);
   return Uri(path: '/index', queryParameters: {
-    'dir': p.dirname(folder.path),
+    'dir': p.dirname(dir),
     'kind': index == EntryKind.image ? 'image' : 'note',
   }).toString();
 }

@@ -14,13 +14,14 @@ l'app), renvoie les résultats, et boucle jusqu'à la réponse finale.
 | [chat_message.dart](../../../lib/features/assistant/domain/chat_message.dart) | Messages neutres (texte, appels d'outils, résultats). |
 | [llm_client.dart](../../../lib/features/assistant/data/llm_client.dart) | 3 clients HTTP : compatible OpenAI, Claude (Messages API), Gemini. |
 | [assistant_config_store.dart](../../../lib/features/assistant/data/assistant_config_store.dart) | Fournisseur, modèle et adresse par fournisseur (`assistant_settings.json`, dossier support de l'app) ; les clés API dans le coffre du système via `flutter_secure_storage`. |
+| [user_profile_store.dart](../../../lib/features/assistant/data/user_profile_store.dart) | Mémoire de Degany : profil de l'utilisateur (clé → valeur), en JSON dans le coffre du système (`SecretStore`, clé `influencor.assistant.userProfile`), jamais dans un fichier en clair ; filtre des secrets (`UserProfile.isSecret`). |
 | [chat_store.dart](../../../lib/features/assistant/data/chat_store.dart) | Conversation en cours sauvegardée entre deux lancements (`assistant_chat.json`, dossier support de l'app). |
 | [agent_tool.dart](../../../lib/features/assistant/application/agent_tool.dart) | Contrat d'un outil, résolution/sécurité des chemins. |
 | [tools/](../../../lib/features/assistant/application/tools/) | Les outils : bibliothèque, Deganeo, tâches/compta/frais, app. |
 | [assistant_providers.dart](../../../lib/features/assistant/application/assistant_providers.dart) | Boucle agent, prompt système, état du chat. |
 | [assistant_chat.dart](../../../lib/features/assistant/presentation/assistant_chat.dart) | Page du chat : liste, défilement qui suit le streaming, saisie, confirmations. |
-| [assistant_transcript.dart](../../../lib/features/assistant/presentation/assistant_transcript.dart) | Rendu façon agent de code : texte pleine largeur avec curseur, bloc de réflexion, actions `● Outil(args)` / `⎿ résultat`, Markdown léger, liens `[[chemin]]`. |
-| [assistant_settings_screen.dart](../../../lib/features/assistant/presentation/assistant_settings_screen.dart) | Réglages : fournisseur, clé, modèle, URL, test. |
+| [assistant_transcript.dart](../../../lib/features/assistant/presentation/assistant_transcript.dart) | Rendu façon agent de code : texte pleine largeur avec curseur, bloc de réflexion, actions `● Outil(args)` / `⎿ résultat`, `ToolGroup` (une suite d'au moins deux actions, avec la réflexion entre elles, repliée en « ● N actions · durée » une fois terminée ; `_entries()` de `assistant_chat.dart` fait les regroupements), Markdown léger, liens `[[chemin]]`. |
+| [assistant_settings_screen.dart](../../../lib/features/assistant/presentation/assistant_settings_screen.dart) | Réglages : fournisseur, clé, modèle, URL, bouton Enregistrer (en plus de l'enregistrement automatique pendant la saisie), test. |
 
 ## Boucle
 
@@ -89,11 +90,36 @@ conversation).
 | Comptabilité | `list_transactions`, `accounting_summary`, `add_transaction`, `update_transaction`, `delete_transaction` |
 | Frais mobile money | `mobile_money_fees`, `list_fee_tariffs` |
 | Conversation | `ask_user` : question avec choix en boutons, attend la réponse (bouton ou texte tapé) |
+| Mémoire | `update_user_profile` : ajoute / corrige / retire des faits sur l'utilisateur (outil silencieux, voir ci-dessous) |
 | App | `open_item`, `open_screen`, `get_settings`, `update_settings`, `copy_to_clipboard`, `share`, `fetch_web_page` |
 
 Ajouter un outil : créer un `AgentTool` dans le fichier du domaine et
 l'ajouter à `agentToolsProvider`. Un outil qui détruit ou remplace des données
 renseigne `confirm` (la question affichée à l'utilisateur).
+
+## Mémoire (profil de l'utilisateur)
+
+`userProfileProvider` (`UserProfileController`) charge le profil depuis
+`UserProfileStore` ; `send()` l'attend, puis `_memoryPrompt()` le place dans le
+prompt système à chaque tour, avec les consignes : le tenir à jour sans le
+commenter, répondre aux questions de l'utilisateur sur lui-même depuis ce
+profil ou en cherchant dans la bibliothèque, ne garder que des faits sur
+l'utilisateur, jamais de secrets ni de données sensibles, et répondre
+honnêtement si l'utilisateur demande ce que Degany retient.
+
+- `update_user_profile` est dans `silentTools` : pas de ligne d'action dans le
+  chat ni dans les groupes repliés, pas d'étiquette « en préparation ».
+- Les clés sont normalisées (`Page Facebook` → `page_facebook`) ; 80 faits de
+  500 caractères au plus. Les secrets (mot de passe, PIN, carte validée par
+  Luhn, clé `sk-…`) sont refusés côté app, quoi que demande le modèle.
+- Coffre indisponible : le profil vit pour la session seulement, rien n'est
+  écrit en clair.
+- `AssistantConfig.memory` (réglage, activé par défaut) : désactivée, l'outil
+  n'est pas proposé et le profil n'est pas envoyé. « Effacer la mémoire »
+  appelle `UserProfileController.clear()`. « Nouvelle conversation » garde
+  le profil.
+- Le profil part chez le fournisseur avec chaque requête : la politique de
+  confidentialité (dépôt `influencor-web`) doit le mentionner.
 
 ## Pièces jointes et questions
 

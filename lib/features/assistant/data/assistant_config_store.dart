@@ -56,6 +56,7 @@ class AssistantConfig {
     this.provider = LlmProviderKind.openai,
     this.providers = const {},
     this.confirmDestructive = true,
+    this.memory = true,
     this.maxSteps = 24,
     this.keysInPlainText = false,
   });
@@ -65,6 +66,9 @@ class AssistantConfig {
 
   /// Ask before trashing, deleting or overwriting anything.
   final bool confirmDestructive;
+
+  /// Degany keeps a private profile of the user (see `UserProfileStore`).
+  final bool memory;
 
   /// Tool rounds allowed for one user message (guards against loops).
   final int maxSteps;
@@ -101,6 +105,7 @@ class AssistantConfig {
     LlmProviderKind? provider,
     Map<LlmProviderKind, ProviderSettings>? providers,
     bool? confirmDestructive,
+    bool? memory,
     int? maxSteps,
     bool? keysInPlainText,
   }) =>
@@ -108,6 +113,7 @@ class AssistantConfig {
         provider: provider ?? this.provider,
         providers: providers ?? this.providers,
         confirmDestructive: confirmDestructive ?? this.confirmDestructive,
+        memory: memory ?? this.memory,
         maxSteps: maxSteps ?? this.maxSteps,
         keysInPlainText: keysInPlainText ?? this.keysInPlainText,
       );
@@ -119,6 +125,7 @@ class AssistantConfig {
   Map<String, dynamic> toJson({bool withKeys = false}) => {
         'provider': provider.name,
         'confirmDestructive': confirmDestructive,
+        'memory': memory,
         'maxSteps': maxSteps,
         'providers': {
           for (final e in providers.entries)
@@ -133,6 +140,7 @@ class AssistantConfig {
     return AssistantConfig(
       provider: LlmProviderKind.byName(raw['provider']),
       confirmDestructive: raw['confirmDestructive'] != false,
+      memory: raw['memory'] != false,
       maxSteps: steps is int && steps >= 1 && steps <= 100 ? steps : 24,
       providers: {
         if (rawProviders is Map)

@@ -59,16 +59,16 @@ class LibraryEntry {
 /// case) shows as a coloured Pro folder that lists every note / image of the
 /// folder it sits in, sub-folders included at any depth. Returns the kind it
 /// gathers, or null for an ordinary entry.
-EntryKind? indexKindOf(LibraryEntry entry) {
-  if (!entry.isFolder) return null;
-  switch (entry.name.toLowerCase()) {
-    case 'index.note':
-      return EntryKind.note;
-    case 'index.img':
-      return EntryKind.image;
-  }
-  return null;
-}
+EntryKind? indexKindOf(LibraryEntry entry) =>
+    entry.isFolder ? indexKindOfFolderName(entry.name) : null;
+
+/// What a folder named [name] gathers when it is an index folder, or null.
+EntryKind? indexKindOfFolderName(String name) =>
+    switch (name.trim().toLowerCase()) {
+      'index.note' => EntryKind.note,
+      'index.img' => EntryKind.image,
+      _ => null,
+    };
 
 /// File extensions recognised as images and videos.
 const imageExtensions = {

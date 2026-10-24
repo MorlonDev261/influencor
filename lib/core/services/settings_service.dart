@@ -25,7 +25,7 @@ String resolveSupportedLanguageCode(String? code, {String fallback = 'fr'}) {
 @immutable
 class AppSettings {
   const AppSettings({
-    this.themeMode = ThemeMode.system,
+    this.themeMode = ThemeMode.light,
     this.viewMode = ViewMode.grid,
     this.languageCode = 'fr',
     this.noteSeparator,
@@ -87,7 +87,7 @@ class AppSettings {
     return AppSettings(
       themeMode: ThemeMode.values.firstWhere(
         (m) => m.name == json['themeMode'],
-        orElse: () => ThemeMode.system,
+        orElse: () => ThemeMode.light,
       ),
       viewMode: ViewMode.values.firstWhere(
         (v) => v.name == json['viewMode'],

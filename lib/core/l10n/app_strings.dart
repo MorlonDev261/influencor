@@ -164,6 +164,9 @@ class AppStrings {
   // Degany — one-line action results
   String toolResults(Object? n) =>
       _t('$n résultat(s)', '$n result(s)', mg: 'Valiny $n');
+  String toolActions(int n) =>
+      _t(n == 1 ? '1 action' : '$n actions', n == 1 ? '1 action' : '$n actions',
+          mg: 'Asa $n');
   String toolItems(Object? n) =>
       _t('$n élément(s)', '$n item(s)', mg: 'Singa $n');
   String toolFields(Object? n) => _t('$n champ(s)', '$n field(s)', mg: '$n');
@@ -223,6 +226,9 @@ class AppStrings {
       mg: 'Andramo ny fifandraisana');
   String get connectionOk =>
       _t('Connexion réussie ✓', 'Connection works ✓', mg: 'Mandeha ✓');
+  String get assistantSettingsSaved =>
+      _t('Réglages de l’assistant enregistrés.', 'Assistant settings saved.',
+          mg: 'Voatahiry ny fikirakirana ny mpanampy.');
   String get confirmDestructive => _t(
         'Demander avant de supprimer ou remplacer',
         'Ask before deleting or replacing',
@@ -233,6 +239,28 @@ class AppStrings {
         'Trash, permanent deletion, replacing an original…',
         mg: 'Fako, famafana tanteraka…',
       );
+  String get deganyMemory =>
+      _t('Mémoire de Degany', 'Degany’s memory', mg: 'Fahatsiarovan’i Degany');
+  String get deganyMemoryHint => _t(
+        'Degany retient ce qu’il apprend sur vous (nom, activité, pages, '
+            'contacts…) pour mieux vous aider. Gardée chiffrée sur cet '
+            'appareil ; demandez-lui ce qu’il sait de vous.',
+        'Degany remembers what it learns about you (name, business, pages, '
+            'contacts…) to help you better. Kept encrypted on this device; '
+            'ask it what it knows about you.',
+        mg: 'Tadidin’i Degany izay fantany momba anao (anarana, asa, pejy, '
+            'fifandraisana…) mba hanampiana anao tsara kokoa. Voaaro sy '
+            'miafina ao amin’ity fitaovana ity.',
+      );
+  String get deganyMemoryClear => _t('Effacer la mémoire', 'Erase the memory',
+      mg: 'Fafao ny fahatsiarovana');
+  String get deganyMemoryClearConfirm => _t(
+        'Degany oubliera tout ce qu’il sait de vous. Continuer ?',
+        'Degany will forget everything it knows about you. Continue?',
+        mg: 'Hohadinoin’i Degany izay rehetra fantany momba anao. Hanohy ve?',
+      );
+  String get deganyMemoryCleared => _t('Mémoire effacée.', 'Memory erased.',
+      mg: 'Voafafa ny fahatsiarovana.');
   String get allow => _t('Autoriser', 'Allow', mg: 'Avela');
   String get deny => _t('Refuser', 'Deny', mg: 'Lavina');
   String get copyPath =>
@@ -920,22 +948,8 @@ class AppStrings {
       _t('Déplacer des fichiers', 'Move files in', mg: 'Hamindra rakitra');
   String get newTable =>
       _t('Nouveau tableau', 'New table', mg: 'Tabilao vaovao');
-  String get importTableJson =>
-      _t('Importer un tableau (JSON)', 'Import a table (JSON)',
-          mg: 'Hampiditra tabilao (JSON)');
-  String get importTableJsonHint => _t(
-      'Fichier .json compatible (type « influencor.table »)',
-      'Compatible .json file ("influencor.table" type)',
-      mg: 'Rakitra .json mifanaraka (karazana « influencor.table »)');
   String get tableNameLabel =>
       _t('Nom du tableau', 'Table name', mg: 'Anaran\'ny tabilao');
-  String tableImportReport(int ok, int incompatible) => incompatible == 0
-      ? _t('$ok tableau(x) importé(s).', '$ok table(s) imported.',
-          mg: '$ok tabilao nampidirina.')
-      : _t(
-          '$ok tableau(x) importé(s), $incompatible fichier(s) incompatible(s).',
-          '$ok table(s) imported, $incompatible incompatible file(s).',
-          mg: '$ok tabilao nampidirina, $incompatible rakitra tsy mifanaraka.');
 
   // Content categories
   String get folders => _t('Dossiers', 'Folders', mg: 'Dossier');

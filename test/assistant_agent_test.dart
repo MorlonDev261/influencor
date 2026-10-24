@@ -13,6 +13,7 @@ import 'package:influencor/features/assistant/application/tools/deganeo_tools.da
 import 'package:influencor/features/assistant/data/assistant_config_store.dart';
 import 'package:influencor/features/assistant/data/chat_store.dart';
 import 'package:influencor/features/assistant/data/llm_client.dart';
+import 'package:influencor/features/assistant/data/user_profile_store.dart';
 import 'package:influencor/features/assistant/domain/chat_message.dart';
 import 'package:influencor/features/assistant/domain/llm_provider.dart';
 import 'package:influencor/features/cleaner/application/metadata_cleaner_service.dart';
@@ -57,12 +58,17 @@ class _EnglishSettings extends SettingsService {
 }
 
 class _FakeConfigStore extends AssistantConfigStore {
+  _FakeConfigStore({this.memory = true});
+
+  final bool memory;
+
   @override
-  Future<AssistantConfig> load() async => const AssistantConfig(
+  Future<AssistantConfig> load() async => AssistantConfig(
         provider: LlmProviderKind.openai,
-        providers: {
+        providers: const {
           LlmProviderKind.openai: ProviderSettings(apiKey: 'sk-test')
         },
+        memory: memory,
       );
 
   @override
@@ -75,6 +81,8 @@ class _ScriptedClient extends LlmClient {
 
   final List<LlmReply Function(List<ChatMessage> history)> turns;
   final requests = <List<ChatMessage>>[];
+  final systems = <String>[];
+  final toolNames = <List<String>>[];
 
   @override
   Future<LlmReply> complete({
@@ -82,6 +90,8 @@ class _ScriptedClient extends LlmClient {
     required List<ChatMessage> history,
     required List<ToolSchema> tools,
   }) async {
+    systems.add(system);
+    toolNames.add([for (final t in tools) t.name]);
     requests.add(List.of(history));
     return turns[requests.length - 1](history);
   }
@@ -189,11 +199,18 @@ void main() {
     }
   });
 
-  Future<ProviderContainer> container(_ScriptedClient client) async {
+  Future<ProviderContainer> container(
+    _ScriptedClient client, {
+    _MemorySecrets? secrets,
+    bool memory = true,
+  }) async {
     final c = ProviderContainer(overrides: [
       settingsServiceProvider.overrideWithValue(_FakeSettings()),
       workspaceRootProvider.overrideWithValue(root.path),
-      assistantConfigStoreProvider.overrideWithValue(_FakeConfigStore()),
+      assistantConfigStoreProvider
+          .overrideWithValue(_FakeConfigStore(memory: memory)),
+      userProfileStoreProvider.overrideWithValue(
+          UserProfileStore(secrets: secrets ?? _MemorySecrets())),
       chatStoreProvider
           .overrideWithValue(ChatStore(file: () async => chatFile)),
       llmClientFactoryProvider.overrideWithValue((_) => client),
@@ -402,6 +419,101 @@ void main() {
       everyElement(ToolStatus.done),
     );
     expect(state.items.last.text, 'Fait : [[Clients/Brief.md]]');
+  });
+
+  group('user profile', () {
+    test('kept encrypted, out of the chat, and known on the next request',
+        () async {
+      final secrets = _MemorySecrets();
+      final client = _ScriptedClient([
+        (_) => _calls([
+              (
+                'update_user_profile',
+                {
+                  'set': [
+                    {'key': 'Nom', 'value': 'Ana Rakoto'},
+                    {'key': 'Page Facebook', 'value': 'facebook.com/ana.shop'},
+                    {'key': 'mot de passe', 'value': 'hunter2'},
+                    {'key': 'carte', 'value': '4111 1111 1111 1111'},
+                  ],
+                }
+              ),
+            ]),
+        (_) => _text('Bonjour Ana !'),
+        (_) => _text('facebook.com/ana.shop'),
+      ]);
+      final c = await container(client, secrets: secrets);
+      final chat = c.read(assistantChatProvider.notifier);
+
+      await chat.send('Je suis Ana Rakoto, ma page : facebook.com/ana.shop');
+
+      final stored = secrets.values['influencor.assistant.userProfile']!;
+      final profile = UserProfile.fromJson(jsonDecode(stored));
+      expect(profile.fields, {
+        'nom': 'Ana Rakoto',
+        'page_facebook': 'facebook.com/ana.shop',
+      });
+      expect(stored, isNot(contains('hunter2')));
+      expect(stored, isNot(contains('4111')));
+      expect(client.requests[1].last.toolResults.single.content,
+          contains('Non enregistré'));
+      // Silent: the call is not an action of the chat.
+      expect(silentTools, contains('update_user_profile'));
+      expect(
+          c
+              .read(assistantChatProvider)
+              .items
+              .where((i) => i.kind == ChatItemKind.tool)
+              .map((i) => i.toolName),
+          ['update_user_profile']);
+
+      await chat.send('Quelle est ma page Facebook ?');
+      expect(client.systems.last,
+          contains('page_facebook: facebook.com/ana.shop'));
+      expect(client.systems.last, contains('nom: Ana Rakoto'));
+    });
+
+    test('a new conversation keeps the profile; turning memory off hides it',
+        () async {
+      final secrets = _MemorySecrets()
+        ..values['influencor.assistant.userProfile'] =
+            jsonEncode(const UserProfile(fields: {'nom': 'Ana'}).toJson());
+      final on = _ScriptedClient([(_) => _text('ok'), (_) => _text('ok')]);
+      final c = await container(on, secrets: secrets);
+      await c.read(assistantChatProvider.notifier).send('a');
+      c.read(assistantChatProvider.notifier).clear();
+      await c.read(assistantChatProvider.notifier).send('b');
+      expect(on.systems.last, contains('nom: Ana'));
+      expect(on.toolNames.last, contains('update_user_profile'));
+
+      final off = _ScriptedClient([(_) => _text('ok')]);
+      final c2 = await container(off, secrets: secrets, memory: false);
+      await c2.read(assistantChatProvider.notifier).send('a');
+      expect(off.systems.single, isNot(contains('nom: Ana')));
+      expect(off.toolNames.single, isNot(contains('update_user_profile')));
+    });
+
+    test('erasing forgets everything', () async {
+      final secrets = _MemorySecrets()
+        ..values['influencor.assistant.userProfile'] =
+            jsonEncode(const UserProfile(fields: {'nom': 'Ana'}).toJson());
+      final c = await container(_ScriptedClient([]), secrets: secrets);
+      expect((await c.read(userProfileProvider.future)).fields, isNotEmpty);
+      await c.read(userProfileProvider.notifier).clear();
+      expect(secrets.values, isEmpty);
+      expect(c.read(userProfileProvider).value!.isEmpty, isTrue);
+    });
+
+    test('phone numbers are kept, card numbers and codes are not', () {
+      expect(UserProfile.isSecret('telephone', '+261 34 12 345 67'), isFalse);
+      expect(
+          UserProfile.isSecret('telephones', '034 12 345 67 / 032 11 222 33'),
+          isFalse);
+      expect(UserProfile.isSecret('pinterest', 'pinterest.com/ana'), isFalse);
+      expect(UserProfile.isSecret('code_pin_mvola', '1234'), isTrue);
+      expect(UserProfile.isSecret('note', '4111-1111-1111-1111'), isTrue);
+      expect(UserProfile.isSecret('cle', 'sk-abcdefghijklmnopqrstuv'), isTrue);
+    });
   });
 
   test('destructive tools wait for the user and respect a refusal', () async {

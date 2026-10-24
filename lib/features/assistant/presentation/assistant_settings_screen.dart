@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/l10n/app_strings.dart';
+import '../../../core/widgets/app_dialog.dart';
 import '../application/assistant_providers.dart';
 import '../data/assistant_config_store.dart';
 import '../data/llm_client.dart';
@@ -28,6 +29,7 @@ class _AssistantSettingsScreenState
   LlmProviderKind? _shown;
   bool _obscure = true;
   bool _busy = false;
+  bool _saving = false;
   String? _status;
   bool _statusOk = false;
   List<String> _models = const [];
@@ -81,6 +83,42 @@ class _AssistantSettingsScreenState
         baseUrl: _url.text.trim(),
       ),
     );
+  }
+
+  /// The save button: writes now and says so (typing also saves on its own).
+  Future<void> _saveNow(AppStrings strings) async {
+    setState(() => _saving = true);
+    try {
+      await _save();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(strings.assistantSettingsSaved)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(strings.genericError)));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _clearMemory(AppStrings strings) async {
+    final ok = await showConfirmDialog(
+      context,
+      title: strings.deganyMemoryClear,
+      message: strings.deganyMemoryClearConfirm,
+      confirmLabel: strings.deganyMemoryClear,
+      cancelLabel: strings.cancel,
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    await ref.read(userProfileProvider.notifier).clear();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(strings.deganyMemoryCleared)));
   }
 
   Future<void> _selectProvider(LlmProviderKind kind) async {
@@ -274,14 +312,30 @@ class _AssistantSettingsScreenState
               ),
             ),
             const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _busy ? null : () => _test(strings),
-              icon: _busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.wifi_tethering),
-              label: Text(strings.testConnection),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  key: const ValueKey('assistant-settings-save'),
+                  onPressed: _saving ? null : () => _saveNow(strings),
+                  icon: _saving
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.save_outlined),
+                  label: Text(strings.save),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _test(strings),
+                  icon: _busy
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.wifi_tethering),
+                  label: Text(strings.testConnection),
+                ),
+              ],
             ),
             if (_status != null) ...[
               const SizedBox(height: 12),
@@ -300,6 +354,26 @@ class _AssistantSettingsScreenState
               onChanged: (v) => ref
                   .read(assistantConfigControllerProvider.notifier)
                   .setConfirmDestructive(v),
+            ),
+            SwitchListTile(
+              key: const ValueKey('assistant-memory'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(strings.deganyMemory),
+              subtitle: Text(strings.deganyMemoryHint),
+              value: config.memory,
+              onChanged: (v) => ref
+                  .read(assistantConfigControllerProvider.notifier)
+                  .setMemory(v),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                key: const ValueKey('assistant-memory-clear'),
+                style: TextButton.styleFrom(foregroundColor: scheme.error),
+                icon: const Icon(Icons.delete_sweep_outlined),
+                label: Text(strings.deganyMemoryClear),
+                onPressed: () => _clearMemory(strings),
+              ),
             ),
           ],
         ),

@@ -155,21 +155,32 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
       final waiting = chat.busy &&
           !last.streaming &&
           !(last.kind == ChatItemKind.tool &&
-              last.status == ToolStatus.running);
+              last.status == ToolStatus.running &&
+              !silentTools.contains(last.toolName));
+      final entries = _entries(chat.items);
       body = NotificationListener<ScrollNotification>(
         onNotification: _onScroll,
         child: ListView.builder(
           controller: _scroll,
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-          itemCount: chat.items.length + (waiting ? 1 : 0),
+          itemCount: entries.length + (waiting ? 1 : 0),
           itemBuilder: (context, i) {
-            if (i == chat.items.length) {
+            if (i == entries.length) {
               return ActivityLine(
                 key: ValueKey('activity-${chat.preparing}'),
                 label: chat.preparing ?? strings.assistantWorking,
               );
             }
-            final item = chat.items[i];
+            final (start, end) = entries[i];
+            if (end - start > 1) {
+              return ToolGroup(
+                key: ValueKey('group-$start'),
+                items: chat.items.sublist(start, end),
+                // Still being worked on: the last part of a running turn.
+                live: chat.busy && end == chat.items.length,
+              );
+            }
+            final item = chat.items[start];
             return switch (item.kind) {
               ChatItemKind.user =>
                 UserMessage(text: item.text, attachments: item.attachments),
@@ -177,8 +188,11 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
                 QuestionCard(item: item, onAnswer: _chat.answer),
               ChatItemKind.assistant => AssistantMessage(item: item),
               ChatItemKind.thinking => ThinkingBlock(item: item),
-              // A question shows as its own card, not as an action line.
-              ChatItemKind.tool when item.toolName == 'ask_user' =>
+              // A question shows as its own card, not as an action line;
+              // silent tools show nothing.
+              ChatItemKind.tool
+                  when item.toolName == 'ask_user' ||
+                      silentTools.contains(item.toolName) =>
                 const SizedBox.shrink(),
               ChatItemKind.tool => ToolActivity(item: item),
               ChatItemKind.notice => Padding(
@@ -259,6 +273,36 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
       ),
     );
   }
+}
+
+/// The list's entries as `(start, end)` ranges of [items]: one item each,
+/// except a run of two actions or more (with the reasoning between them),
+/// which [ToolGroup] folds once it is done.
+List<(int, int)> _entries(List<ChatItem> items) {
+  bool inRun(ChatItem item) =>
+      item.kind == ChatItemKind.thinking ||
+      (item.kind == ChatItemKind.tool && item.toolName != 'ask_user');
+  final out = <(int, int)>[];
+  var i = 0;
+  while (i < items.length) {
+    var end = i;
+    var tools = 0;
+    while (end < items.length && inRun(items[end])) {
+      if (items[end].kind == ChatItemKind.tool &&
+          !silentTools.contains(items[end].toolName)) {
+        tools++;
+      }
+      end++;
+    }
+    if (tools >= 2) {
+      out.add((i, end));
+      i = end;
+    } else {
+      out.add((i, i + 1));
+      i++;
+    }
+  }
+  return out;
 }
 
 class _ChatHeader extends ConsumerWidget {

@@ -45,6 +45,20 @@ acceptés sont ignorés et signalés.
 L'action **Déplacer des fichiers** importe les fichiers puis supprime les
 originaux si la copie a réussi.
 
+## Dossiers index (Pro)
+
+Un dossier nommé `index.note` affiche **Toutes les notes** : chaque note du
+dossier où il se trouve et de tous ses sous-dossiers, quelle que soit leur
+profondeur. `index.img` fait de même avec les images (grille, on fait défiler
+toutes les images de l'index). Ils apparaissent comme des dossiers colorés.
+
+1. Dans le dossier voulu, **Ajouter** → **Nouveau dossier**.
+2. Nommez-le `index.note` (ou `index.img`).
+3. Ouvrez-le : la liste se met à jour (tirez vers le bas ou bouton
+   actualiser pour relire le disque).
+
+Degany sait aussi les créer et les ouvrir.
+
 ## Cas particuliers
 
 - Les fichiers `.txt` importés sont convertis en notes `.md`.

@@ -30,7 +30,7 @@ const _screens = {
 
 /// Route that opens [path] in the right screen (folder, note, table, media).
 Future<String> routeForPath(String path) async {
-  if (await FileSystemEntity.isDirectory(path)) return browseRoute(path);
+  if (await FileSystemEntity.isDirectory(path)) return directoryRoute(path);
   return switch (await kindForFilePath(path)) {
     EntryKind.note => noteRoute(path),
     EntryKind.table => tableRoute(path),

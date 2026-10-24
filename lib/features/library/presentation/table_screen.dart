@@ -631,7 +631,7 @@ class _TableCanvas extends StatefulWidget {
 }
 
 class _TableCanvasState extends State<_TableCanvas> {
-  static const _handleColumnWidth = 108.0;
+  static const _handleColumnWidth = 80.0;
   static const _autoScrollEdge = 56.0;
   static const _autoScrollStep = 14.0;
 
@@ -640,9 +640,27 @@ class _TableCanvasState extends State<_TableCanvas> {
   final _viewportKey = GlobalKey();
   Timer? _autoScrollTimer;
   Offset? _dragPosition;
-  String? _hoverColumnId;
-  String? _hoverRowId;
   _ActiveField? _active;
+
+  // Kanban-style drag & drop: the whole row / column follows the pointer and
+  // the others make room for it right away; the new order is applied on
+  // release.
+  _TableDrag? _drag;
+
+  /// Where the dragged row / column sits for now, as an index in
+  /// [_baseRowIds] / [_baseColumnIds]; null while it is still in its place.
+  int? _dragIndex;
+
+  /// Order of the table (base) and order on screen (with the drag preview),
+  /// as of the last build.
+  List<String> _baseRowIds = const [];
+  List<String> _baseColumnIds = const [];
+  List<String> _shownRowIds = const [];
+  List<String> _shownColumnIds = const [];
+
+  /// Each row's handle cell and each column's header cell, to measure them.
+  final _rowProbes = <String, BuildContext>{};
+  final _columnProbes = <String, BuildContext>{};
 
   @override
   void dispose() {
@@ -654,8 +672,39 @@ class _TableCanvasState extends State<_TableCanvas> {
 
   // ── Drag & drop ─────────────────────────────────────────────────────────
 
-  void _onDragStarted() {
+  bool _isDragged(String id, {required bool column}) =>
+      _drag != null && _drag!.id == id && _drag!.isColumn == column;
+
+  /// [items] in the order on screen: the dragged one moved to [_dragIndex].
+  List<T> _preview<T>(
+    List<T> items,
+    String Function(T item) idOf, {
+    required bool columns,
+  }) {
+    final drag = _drag;
+    final to = _dragIndex;
+    if (drag == null || to == null || drag.isColumn != columns) return items;
+    final from = items.indexWhere((item) => idOf(item) == drag.id);
+    if (from < 0 || from == to || to >= items.length) return items;
+    final list = [...items];
+    list.insert(to, list.removeAt(from));
+    return list;
+  }
+
+  Rect? _rectOf(String id, {required bool column}) {
+    final context = (column ? _columnProbes : _rowProbes)[id];
+    if (context == null || !context.mounted) return null;
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  void _onDragStarted(_TableDrag data) {
     HapticFeedback.mediumImpact();
+    setState(() {
+      _drag = data;
+      _dragIndex = null;
+    });
     _autoScrollTimer?.cancel();
     _autoScrollTimer = Timer.periodic(
       const Duration(milliseconds: 16),
@@ -663,27 +712,92 @@ class _TableCanvasState extends State<_TableCanvas> {
     );
   }
 
+  void _onDragUpdate(DragUpdateDetails details) {
+    _dragPosition = details.globalPosition;
+    _updatePreview();
+  }
+
   void _onDragEnded() {
     _autoScrollTimer?.cancel();
     _autoScrollTimer = null;
     _dragPosition = null;
-    if (_hoverColumnId != null || _hoverRowId != null) {
-      setState(() {
-        _hoverColumnId = null;
-        _hoverRowId = null;
-      });
+    final drag = _drag;
+    final to = _dragIndex;
+    if (drag == null) return;
+    final base = drag.isColumn ? _baseColumnIds : _baseRowIds;
+    setState(() {
+      _drag = null;
+      _dragIndex = null;
+    });
+    final from = base.indexOf(drag.id);
+    if (to == null || from < 0 || to == from || to >= base.length) return;
+    if (drag.isColumn) {
+      widget.onMoveColumn(drag.id, base[to]);
+    } else {
+      widget.onMoveRow(drag.id, base[to]);
     }
+  }
+
+  /// Moves the dragged row / column to the place under the pointer. It only
+  /// moves when it would still be under the pointer once there, so rows of
+  /// different heights don't swap back and forth.
+  void _updatePreview() {
+    final drag = _drag;
+    final position = _dragPosition;
+    if (drag == null || position == null) return;
+    final column = drag.isColumn;
+    final ids = column ? _shownColumnIds : _shownRowIds;
+    final current = ids.indexOf(drag.id);
+    final dragged = _rectOf(drag.id, column: column);
+    if (current < 0 || dragged == null) return;
+    double start(Rect r) => column ? r.left : r.top;
+    double end(Rect r) => column ? r.right : r.bottom;
+    final at = column ? position.dx : position.dy;
+    final size = end(dragged) - start(dragged);
+
+    int? to;
+    if (at < start(dragged)) {
+      for (var i = current - 1; i >= 0; i--) {
+        final r = _rectOf(ids[i], column: column);
+        if (r == null) return;
+        if (at >= start(r) || i == 0) {
+          to = at < start(r) + size ? i : (i + 1 < current ? i + 1 : null);
+          break;
+        }
+      }
+    } else if (at >= end(dragged)) {
+      for (var i = current + 1; i < ids.length; i++) {
+        final r = _rectOf(ids[i], column: column);
+        if (r == null) return;
+        if (at < end(r) || i == ids.length - 1) {
+          to = at >= end(r) - size ? i : (i - 1 > current ? i - 1 : null);
+          break;
+        }
+      }
+    }
+    if (to == null || to == current) return;
+    // The others keep their relative order, so moving it to `to` on screen
+    // is moving it to `to` in the base order.
+    HapticFeedback.selectionClick();
+    setState(() => _dragIndex = to);
   }
 
   /// Scrolls the table while a dragged column / row is held near an edge, so
   /// it can reach the part of the table that is off screen.
   void _autoScroll() {
     final position = _dragPosition;
+    final drag = _drag;
     final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
-    if (position == null || box == null || !box.hasSize) return;
+    if (position == null || drag == null || box == null || !box.hasSize) {
+      return;
+    }
     final local = box.globalToLocal(position);
-    _nudge(_horizontal, local.dx, box.size.width);
-    _nudge(_vertical, local.dy, box.size.height);
+    if (drag.isColumn) {
+      _nudge(_horizontal, local.dx, box.size.width);
+    } else {
+      _nudge(_vertical, local.dy, box.size.height);
+    }
+    _updatePreview();
   }
 
   void _nudge(ScrollController controller, double at, double extent) {
@@ -702,62 +816,22 @@ class _TableCanvasState extends State<_TableCanvas> {
     if (target != position.pixels) controller.jumpTo(target);
   }
 
-  void _setHover({String? columnId, String? rowId}) {
-    if (_hoverColumnId == columnId && _hoverRowId == rowId) return;
-    setState(() {
-      _hoverColumnId = columnId;
-      _hoverRowId = rowId;
-    });
-  }
-
-  /// Wraps a cell so a dragged column (or row, when [rowId] is set) can be
-  /// dropped on it. The whole target column / row is highlighted.
-  Widget _dropTarget(
-    Widget cell, {
-    required String? columnId,
-    String? rowId,
-  }) {
-    if (!widget.editing) return cell;
-    final scheme = Theme.of(context).colorScheme;
-    final highlighted = (columnId != null && columnId == _hoverColumnId) ||
-        (rowId != null && rowId == _hoverRowId);
-    return DragTarget<_TableDrag>(
-      onWillAcceptWithDetails: (details) {
-        final drag = details.data;
-        final target = drag.isColumn ? columnId : rowId;
-        final accept = target != null && target != drag.id;
-        _setHover(
-          columnId: accept && drag.isColumn ? columnId : null,
-          rowId: accept && !drag.isColumn ? rowId : null,
-        );
-        return accept;
-      },
-      onLeave: (_) => _setHover(),
-      onAcceptWithDetails: (details) {
-        final drag = details.data;
-        _setHover();
-        if (drag.isColumn) {
-          widget.onMoveColumn(drag.id, columnId!);
-        } else {
-          widget.onMoveRow(drag.id, rowId!);
-        }
-      },
-      builder: (context, _, __) => AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        color: highlighted
-            ? scheme.primary.withValues(alpha: 0.16)
-            : Colors.transparent,
-        child: cell,
-      ),
-    );
-  }
+  /// The empty slot the dragged row / column leaves (and moves along): the
+  /// same tree whether dragged or not, so the drag survives the rebuilds.
+  Widget _slot(bool dragged, Widget cell) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: dragged
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.10)
+              : Colors.transparent,
+        ),
+        child: Opacity(opacity: dragged ? 0.2 : 1, child: cell),
+      );
 
   Widget _dragHandle({
     required _TableDrag data,
-    required String label,
+    required Widget Function() feedback,
     required Color color,
   }) {
-    final scheme = Theme.of(context).colorScheme;
     final handle = Semantics(
       label: widget.strings.dragToMove,
       child: MouseRegion(
@@ -769,41 +843,18 @@ class _TableCanvasState extends State<_TableCanvas> {
         ),
       ),
     );
-    final feedback = Material(
-      elevation: 6,
-      color: scheme.primaryContainer,
-      borderRadius: BorderRadius.circular(8),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 220),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                data.isColumn ? Icons.view_column_outlined : Icons.table_rows,
-                size: 18,
-                color: scheme.onPrimaryContainer,
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: scheme.onPrimaryContainer,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    final faded = Opacity(opacity: 0.3, child: handle);
-    void onUpdate(DragUpdateDetails details) =>
-        _dragPosition = details.globalPosition;
+    // The feedback is the whole row / column, built when the drag starts and
+    // held where it was grabbed.
+    final picture = Builder(builder: (_) => feedback());
+    Offset anchor(Draggable<Object> d, BuildContext context, Offset position) {
+      final rect = _rectOf(data.id, column: data.isColumn);
+      return rect == null
+          ? childDragAnchorStrategy(d, context, position)
+          : position - rect.topLeft;
+    }
+
+    // A row only moves up and down, a column left and right.
+    final axis = data.isColumn ? Axis.horizontal : Axis.vertical;
 
     // Mouse: drag right away. Touch: a short hold first, so a quick swipe
     // on the handle still scrolls the table.
@@ -817,23 +868,70 @@ class _TableCanvasState extends State<_TableCanvas> {
     if (isDesktop) {
       return Draggable<_TableDrag>(
         data: data,
-        feedback: feedback,
-        childWhenDragging: faded,
-        onDragStarted: _onDragStarted,
-        onDragUpdate: onUpdate,
+        axis: axis,
+        feedback: picture,
+        dragAnchorStrategy: anchor,
+        onDragStarted: () => _onDragStarted(data),
+        onDragUpdate: _onDragUpdate,
         onDragEnd: (_) => _onDragEnded(),
         child: handle,
       );
     }
     return LongPressDraggable<_TableDrag>(
       data: data,
+      axis: axis,
       delay: const Duration(milliseconds: 180),
-      feedback: feedback,
-      childWhenDragging: faded,
-      onDragStarted: _onDragStarted,
-      onDragUpdate: onUpdate,
+      feedback: picture,
+      dragAnchorStrategy: anchor,
+      onDragStarted: () => _onDragStarted(data),
+      onDragUpdate: _onDragUpdate,
       onDragEnd: (_) => _onDragEnded(),
       child: handle,
+    );
+  }
+
+  /// The dragged row or column as it looks in the table, lifted.
+  Widget _feedbackFrame(Widget child) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 10,
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(6),
+      clipBehavior: Clip.antiAlias,
+      child: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(
+          border: Border.all(color: scheme.primary, width: 2),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _feedbackCell(
+    String text, {
+    required double width,
+    required double height,
+    Color? color,
+    TextStyle? style,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: width,
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      alignment: AlignmentDirectional.centerStart,
+      decoration: BoxDecoration(
+        color: color,
+        border: Border.all(color: scheme.outlineVariant, width: 0.5),
+      ),
+      child: Text(
+        text,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      ),
     );
   }
 
@@ -947,6 +1045,17 @@ class _TableCanvasState extends State<_TableCanvas> {
                 !TableDocument.isBracketColumnTitle(c.title) ||
                 c.id == activeColumn)
             .toList();
+    // On screen: the dragged row / column at the place it is held over.
+    final shownColumns = _preview(displayedColumns, (c) => c.id, columns: true);
+    final shownRows = _preview(
+      table.rows.indexed.toList(),
+      (r) => r.$2.id,
+      columns: false,
+    );
+    _baseColumnIds = [for (final c in displayedColumns) c.id];
+    _shownColumnIds = [for (final c in shownColumns) c.id];
+    _baseRowIds = [for (final r in table.rows) r.id];
+    _shownRowIds = [for (final (_, r) in shownRows) r.id];
 
     final Widget tableWidget;
     if (displayedColumns.isEmpty) {
@@ -983,13 +1092,55 @@ class _TableCanvasState extends State<_TableCanvas> {
         ),
       );
     } else {
-      String rowLabel(int row) {
-        for (final column in displayedColumns) {
-          final value =
-              evaluator.displayAt(row, columnIndex[column.id]!).trim();
-          if (value.isNotEmpty) return value;
-        }
-        return '…';
+      double widthOf(TableColumnDef column) =>
+          _rectOf(column.id, column: true)?.width ?? cellConstraints.minWidth;
+      double heightOf(TableRowData row) =>
+          _rectOf(row.id, column: false)?.height ?? 44;
+
+      Widget rowFeedback(int rowIndex, TableRowData row) {
+        final height = heightOf(row);
+        return _feedbackFrame(Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: _handleColumnWidth,
+              height: height,
+              child: Icon(Icons.drag_indicator, color: scheme.primary),
+            ),
+            for (final column in shownColumns)
+              _feedbackCell(
+                evaluator.displayAt(rowIndex, columnIndex[column.id]!),
+                width: widthOf(column),
+                height: height,
+              ),
+          ],
+        ));
+      }
+
+      Widget columnFeedback(TableColumnDef column) {
+        final index = columnIndex[column.id]!;
+        final width = widthOf(column);
+        return _feedbackFrame(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _feedbackCell(
+              TableFormula.parseHeader(column.title).display,
+              width: width,
+              height: _rectOf(column.id, column: true)?.height ?? 48,
+              color: scheme.primaryContainer,
+              style: TextStyle(
+                color: scheme.onPrimaryContainer,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            for (final (rowIndex, row) in table.rows.indexed)
+              _feedbackCell(
+                evaluator.displayAt(rowIndex, index),
+                width: width,
+                height: heightOf(row),
+              ),
+          ],
+        ));
       }
 
       Widget headerCell(TableColumnDef column) {
@@ -1009,7 +1160,7 @@ class _TableCanvasState extends State<_TableCanvas> {
           dragHandle: editing
               ? _dragHandle(
                   data: _TableDrag.column(column.id),
-                  label: TableFormula.parseHeader(column.title).label,
+                  feedback: () => columnFeedback(column),
                   color: scheme.onPrimaryContainer.withValues(alpha: 0.7),
                 )
               : null,
@@ -1028,19 +1179,28 @@ class _TableCanvasState extends State<_TableCanvas> {
             cell,
           );
         }
-        return _dropTarget(
-          columnId: column.id,
-          ConstrainedBox(
-            constraints: cellConstraints,
-            child: editing
-                ? _pickTarget(
-                    cell,
-                    key: key,
-                    reference: (forHeader) =>
-                        forHeader ? letters : '$letters:$letters',
-                  )
-                : cell,
-          ),
+        final sized = ConstrainedBox(
+          constraints: cellConstraints,
+          child: editing
+              ? _pickTarget(
+                  cell,
+                  key: key,
+                  reference: (forHeader) =>
+                      forHeader ? letters : '$letters:$letters',
+                )
+              : cell,
+        );
+        // Keyed (unique in the whole table): a moved column keeps its cells
+        // and an ongoing drag.
+        return KeyedSubtree(
+          key: ValueKey('h:${column.id}'),
+          child: editing
+              ? _Probe(
+                  id: column.id,
+                  registry: _columnProbes,
+                  child: _slot(_isDragged(column.id, column: true), sized),
+                )
+              : sized,
         );
       }
 
@@ -1075,20 +1235,26 @@ class _TableCanvasState extends State<_TableCanvas> {
             cell,
           );
         }
-        return _dropTarget(
-          columnId: column.id,
-          rowId: row.id,
-          ConstrainedBox(
-            constraints: cellConstraints,
-            child: editing
-                ? _pickTarget(
-                    cell,
-                    key: key,
-                    reference: (forHeader) =>
-                        forHeader ? letters : '$letters${rowIndex + 1}',
-                  )
-                : cell,
-          ),
+        final sized = ConstrainedBox(
+          constraints: cellConstraints,
+          child: editing
+              ? _pickTarget(
+                  cell,
+                  key: key,
+                  reference: (forHeader) =>
+                      forHeader ? letters : '$letters${rowIndex + 1}',
+                )
+              : cell,
+        );
+        return KeyedSubtree(
+          key: ValueKey('${row.id}:${column.id}'),
+          child: editing
+              ? _slot(
+                  _isDragged(column.id, column: true) ||
+                      _isDragged(row.id, column: false),
+                  sized,
+                )
+              : sized,
         );
       }
 
@@ -1112,58 +1278,54 @@ class _TableCanvasState extends State<_TableCanvas> {
             border: TableBorder.all(color: borderColor),
             children: [
               TableRow(
+                key: const ValueKey('header'),
                 decoration: BoxDecoration(color: scheme.primaryContainer),
                 children: [
                   if (editing)
                     Center(
+                      key: const ValueKey('fx'),
                       child: Icon(
                         Icons.functions,
                         size: 18,
                         color: scheme.onPrimaryContainer.withValues(alpha: 0.5),
                       ),
                     ),
-                  for (final column in displayedColumns) headerCell(column),
+                  for (final column in shownColumns) headerCell(column),
                 ],
               ),
-              for (final (rowIndex, row) in table.rows.indexed)
+              // Keyed: a moved row keeps its cells (and an ongoing drag).
+              for (final (rowIndex, row) in shownRows)
                 TableRow(
+                  key: ValueKey(row.id),
                   children: [
                     if (editing)
-                      _dropTarget(
-                        columnId: null,
-                        rowId: row.id,
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 24,
-                              child: Text(
-                                '${rowIndex + 1}',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: scheme.outline,
-                                ),
+                      _Probe(
+                        key: ValueKey('handle:${row.id}'),
+                        id: row.id,
+                        registry: _rowProbes,
+                        child: _slot(
+                          _isDragged(row.id, column: false),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _dragHandle(
+                                data: _TableDrag.row(row.id),
+                                feedback: () => rowFeedback(rowIndex, row),
+                                color: scheme.outline,
                               ),
-                            ),
-                            _dragHandle(
-                              data: _TableDrag.row(row.id),
-                              label: rowLabel(rowIndex),
-                              color: scheme.outline,
-                            ),
-                            IconButton(
-                              tooltip: strings.deleteTableRow,
-                              visualDensity: VisualDensity.compact,
-                              iconSize: 20,
-                              color: scheme.error,
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: () => widget.onDeleteRow(row.id),
-                            ),
-                          ],
+                              IconButton(
+                                tooltip: strings.deleteTableRow,
+                                visualDensity: VisualDensity.compact,
+                                iconSize: 20,
+                                color: scheme.error,
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => widget.onDeleteRow(row.id),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    for (final column in displayedColumns)
+                    for (final column in shownColumns)
                       bodyCell(rowIndex, row, column),
                   ],
                 ),
@@ -1303,6 +1465,52 @@ class _TableCanvasState extends State<_TableCanvas> {
       },
     );
   }
+}
+
+/// Registers its element under [id] so the table can measure the cell
+/// (the drag & drop needs each row's and column's place on screen).
+class _Probe extends StatefulWidget {
+  const _Probe({
+    required this.id,
+    required this.registry,
+    required this.child,
+    super.key,
+  });
+
+  final String id;
+  final Map<String, BuildContext> registry;
+  final Widget child;
+
+  @override
+  State<_Probe> createState() => _ProbeState();
+}
+
+class _ProbeState extends State<_Probe> {
+  @override
+  void initState() {
+    super.initState();
+    widget.registry[widget.id] = context;
+  }
+
+  @override
+  void didUpdateWidget(covariant _Probe old) {
+    super.didUpdateWidget(old);
+    if (old.id != widget.id || old.registry != widget.registry) {
+      if (old.registry[old.id] == context) old.registry.remove(old.id);
+      widget.registry[widget.id] = context;
+    }
+  }
+
+  @override
+  void dispose() {
+    if (widget.registry[widget.id] == context) {
+      widget.registry.remove(widget.id);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// The text field currently focused in edit mode, for formula references.

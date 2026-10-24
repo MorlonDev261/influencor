@@ -462,16 +462,6 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.data_object_outlined),
-              title: Text(strings.importTableJson),
-              subtitle: Text(strings.importTableJsonHint),
-              onTap: () {
-                Navigator.pop(sheetContext);
-
-                _importTableJson();
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.upload_file_outlined),
               title: Text(strings.importFiles),
               onTap: () {
@@ -539,55 +529,6 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
       if (mounted) unawaited(context.push(tableRoute(path)));
     } catch (_) {
       if (mounted) _snack(strings.genericError);
-    }
-  }
-
-  /// Imports `.json` files that follow the `influencor.table` schema. Files
-  /// that do not match are skipped and counted as incompatible.
-  Future<void> _importTableJson() async {
-    final strings = ref.read(appStringsProvider);
-
-    final paths = await AppFilePicker.pick(
-      context,
-      mode: PickMode.jsonFiles,
-      title: strings.importTableJson,
-    );
-
-    if (paths.isEmpty) return;
-
-    final controller = ref.read(libraryControllerProvider);
-    final created = <String>[];
-    var incompatible = 0;
-
-    try {
-      for (final path in paths) {
-        final table = await TableDocument.read(path);
-        if (table == null) {
-          incompatible++;
-          continue;
-        }
-        created.add(await controller.createTable(
-          _dir,
-          name: p.basenameWithoutExtension(path),
-          table: table,
-        ));
-      }
-    } catch (_) {
-      if (mounted) _snack(strings.genericError);
-      return;
-    }
-
-    if (!mounted) return;
-
-    if (created.isEmpty && incompatible > 0) {
-      _snack(strings.incompatibleTable);
-      return;
-    }
-
-    _snack(strings.tableImportReport(created.length, incompatible));
-
-    if (created.length == 1 && incompatible == 0) {
-      unawaited(context.push(tableRoute(created.single)));
     }
   }
 

@@ -296,5 +296,45 @@ void main() {
       await tester.pumpAndSettle();
       expect(headerX(tester, 'Ville'), lessThan(headerX(tester, 'Nom')));
     });
+
+    testWidgets('a dragged row makes room live, before it is dropped',
+        (tester) async {
+      await pumpTable(tester, buildTable());
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+
+      // No row numbers in edit mode, only the handles.
+      expect(find.text('1'), findsNothing);
+      expect(find.text('2'), findsNothing);
+
+      double rowY(String text) => tester
+          .getTopLeft(find.descendant(
+              of: find.byType(Table), matching: find.text(text)))
+          .dy;
+      expect(rowY('Jean'), lessThan(rowY('Rivo')));
+
+      // Handles: one per shown column (Nom, Ville), then one per row.
+      final rivoHandle = find.byIcon(Icons.drag_indicator).at(3);
+      final gesture = await tester.startGesture(tester.getCenter(rivoHandle));
+      await tester.pump(const Duration(milliseconds: 400));
+      await gesture.moveBy(const Offset(0, -10));
+      await tester.pump();
+      await gesture.moveTo(Offset(
+        tester.getCenter(rivoHandle).dx,
+        rowY('Jean') + 4,
+      ));
+      await tester.pump();
+      await tester.pump();
+      // Still held: Rivo already sits above Jean.
+      expect(rowY('Rivo'), lessThan(rowY('Jean')));
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pumpAndSettle();
+      expect(rowY('Rivo'), lessThan(rowY('Jean')));
+    });
   });
 }

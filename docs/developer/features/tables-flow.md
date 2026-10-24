@@ -15,16 +15,11 @@ Le type attendu est:
 influencor.table
 ```
 
-## Création et import
+## Création
 
-Le bouton **Ajouter** de `browse_screen.dart` propose :
-
-- **Nouveau tableau** : `_createTable()` crée un tableau vide (3 colonnes,
-  1 ligne) via `LibraryController.createTable()` puis ouvre `tableRoute`.
-- **Importer un tableau (JSON)** : `_importTableJson()` ouvre le sélecteur
-  natif (`PickMode.jsonFiles`, filtre `.json`), valide chaque fichier avec
-  `TableDocument.read()` et recrée les fichiers compatibles dans le dossier
-  courant. Les fichiers incompatibles sont ignorés et comptés dans le rapport.
+Le bouton **Ajouter** de `browse_screen.dart` propose **Nouveau tableau** :
+`_createTable()` crée un tableau vide (3 colonnes, 1 ligne) via
+`LibraryController.createTable()` puis ouvre `tableRoute`.
 
 ## Lecture
 
@@ -36,6 +31,27 @@ Si le format ne correspond pas, le fichier n'est pas considéré comme tableau.
 L'écran d'édition est:
 
 - [table_screen.dart](../../../lib/features/library/presentation/table_screen.dart)
+
+### Réorganiser (glisser-déposer)
+
+En édition, chaque ligne a une poignée (et un bouton supprimer, sans numéro) ;
+chaque colonne a sa poignée dans le titre. Le glisser est façon kanban
+(`_TableCanvasState`) :
+
+- l'aperçu (`feedback`) est la ligne ou la colonne entière, tenue là où elle a
+  été saisie (`dragAnchorStrategy`) et bloquée sur son axe ;
+- pendant le glisser, `_dragIndex` place la ligne / colonne sous le pointeur
+  et les autres se décalent tout de suite ; sa place reste visible (case
+  teintée). Elle ne bouge que si elle resterait sous le pointeur une fois
+  déplacée, pour éviter les allers-retours entre lignes de hauteurs
+  différentes ;
+- au lâcher, `onMoveRow` / `onMoveColumn` appliquent l'ordre (les formules
+  sont réécrites par `TableFormula.rewriteReferences`).
+
+Les lignes (`TableRow.key`) et cellules ont des clés uniques dans tout le
+tableau, pour que l'élément glissé garde son état pendant qu'il change de
+place ; `_Probe` enregistre la cellule poignée de chaque ligne et le titre de
+chaque colonne pour les mesurer.
 
 ## Sauvegarde
 

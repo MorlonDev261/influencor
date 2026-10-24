@@ -15,7 +15,7 @@ Action disponible:
 Options disponibles:
 
 - thème système;
-- thème clair;
+- thème clair (par défaut);
 - thème sombre.
 
 ## Vue par défaut

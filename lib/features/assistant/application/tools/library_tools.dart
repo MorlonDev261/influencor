@@ -190,9 +190,18 @@ List<AgentTool> libraryTools() => [
           if (await _type(dir) != FileSystemEntityType.directory) {
             throw ToolError("Ce n'est pas un dossier : ${a.optStr('path')}");
           }
-          var entries = a.flag('recursive')
-              ? await ctx.repo.listAllUnder(dir)
-              : await ctx.repo.listEntries(dir);
+          // An index folder shows every note / image of the folder it sits
+          // in, sub-folders included: list that, as the app does.
+          final index = indexKindOfFolderName(p.basename(dir));
+          var entries = index != null
+              ? [
+                  for (final e in await ctx.repo
+                      .listAllUnder(p.dirname(dir), includeAttachments: true))
+                    if (e.kind == index) e,
+                ]
+              : a.flag('recursive')
+                  ? await ctx.repo.listAllUnder(dir)
+                  : await ctx.repo.listEntries(dir);
           final kind = _kind(a.optStr('kind'));
           if (kind != null) {
             entries = entries.where((e) => e.kind == kind).toList();
@@ -200,6 +209,8 @@ List<AgentTool> libraryTools() => [
           final limit = (a.optInt('limit') ?? 200).clamp(1, 1000);
           return {
             'folder': ctx.rel(dir),
+            if (index != null)
+              'index_of': '${index.name}s de ${ctx.rel(p.dirname(dir))}',
             'total': entries.length,
             'entries': [for (final e in entries.take(limit)) ctx.entryJson(e)],
             if (entries.length > limit) 'truncated': true,
