@@ -84,3 +84,8 @@ testlock_release() {
   docker rm -f "$TESTLOCK_ID" >/dev/null 2>&1
   TESTLOCK_ID=
 }
+
+# Verrou déjà libéré par un sous-shell : on l'oublie sans le retirer.
+testlock_forget() {
+  TESTLOCK_ID=
+}

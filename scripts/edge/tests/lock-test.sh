@@ -70,7 +70,7 @@ check "le second attend puis passe (code 0)" "$rc" "0"
 check "il a bien attendu (>= 2 s)" "$([ $((t1 - t0)) -ge 2 ] && echo oui || echo non)" "oui"
 check "il annonce l'attente" "$(grep -c '^En attente' "$TMP/w")" "1"
 check "verrou libre ensuite" "$(lock_id)" ""
-TESTLOCK_ID=
+testlock_forget
 
 echo "== 4) Verrous orphelins"
 sh -c 'exit 0' & dead=$!; wait "$dead"

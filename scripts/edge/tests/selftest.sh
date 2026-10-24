@@ -99,12 +99,17 @@ longest_gap_ms() {
        END { if (s >= 0 && l - s > m) m = l - s; print m }' "$1"
 }
 # Plafond de coupure : sous Linux, une bascule se mesure en centaines de ms (avant
-# ces réglages, ~8 s en production) ; sous Docker Desktop (Git Bash, Windows),
-# chaque commande docker coûte ~0,5 s et la même bascule prend 5 à 7 s.
-# MI_KANDRA_TEST_MAX_GAP_MS le remplace.
+# ces réglages, ~8 s en production) ; sous Docker Desktop (Git Bash ou WSL sous
+# Windows), chaque commande docker coûte ~0,5 s et la même bascule prend 3 à 7 s.
+# C'est le moteur qui décide : WSL répond « Linux » à uname mais parle à Docker
+# Desktop. MI_KANDRA_TEST_MAX_GAP_MS le remplace.
 case "$(uname -s 2>/dev/null)" in
-  MINGW*|MSYS*|CYGWIN*) GAP_MAX=${MI_KANDRA_TEST_MAX_GAP_MS:-12000} ;;
-  *)                    GAP_MAX=${MI_KANDRA_TEST_MAX_GAP_MS:-3000} ;;
+  MINGW*|MSYS*|CYGWIN*) GAP_ENGINE="Docker Desktop" ;;
+  *) GAP_ENGINE=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null) ;;
+esac
+case "$GAP_ENGINE" in
+  *"Docker Desktop"*) GAP_MAX=${MI_KANDRA_TEST_MAX_GAP_MS:-12000} ;;
+  *)                  GAP_MAX=${MI_KANDRA_TEST_MAX_GAP_MS:-3000} ;;
 esac
 # Coupure inférieure au plafond ? Affiche la mesure dans tous les cas.
 check_gap() { # $1 libellé, $2 fichier, $3 plafond en ms

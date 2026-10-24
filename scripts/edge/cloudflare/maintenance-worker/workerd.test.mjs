@@ -17,6 +17,11 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WIN = process.platform === "win32";
 
+// Sous Windows, npx.cmd ne se lance que par un shell : on lui passe alors une seule ligne de
+// commande, car une liste d'arguments avec shell: true déclenche DEP0190 (rien n'est échappé).
+// Les arguments sont tous fixes ici, sans espace ni caractère spécial.
+const npx = (args) => (WIN ? [["npx.cmd", ...args].join(" "), []] : ["npx", args]);
+
 const freePort = () => new Promise((resolve) => {
   const s = net.createServer().listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
@@ -42,7 +47,7 @@ function killDev() {
 }
 
 before(async () => {
-  if (spawnSync(WIN ? "npx.cmd" : "npx", ["--version"], { stdio: "ignore", shell: WIN }).status !== 0) { skip = "npx introuvable"; return; }
+  if (spawnSync(...npx(["--version"]), { stdio: "ignore", shell: WIN }).status !== 0) { skip = "npx introuvable"; return; }
   // Sous Windows, workerd libère son dossier .wrangler après la fin du test : chaque lancement
   // supprime donc ceux des lancements précédents (il en reste au plus un).
   const parent = path.join(os.tmpdir(), "mi-kandra-maintenance-test");
@@ -55,8 +60,8 @@ before(async () => {
   originPort = await freePort(); devPort = await freePort();
   await startOrigin();
   base = `http://127.0.0.1:${devPort}`;
-  dev = spawn(WIN ? "npx.cmd" : "npx", ["-y", "wrangler@4", "dev", "--port", String(devPort), "--ip", "127.0.0.1",
-    "--local-upstream", `127.0.0.1:${originPort}`, "--inspector-port", String(await freePort())], {
+  dev = spawn(...npx(["-y", "wrangler@4", "dev", "--port", String(devPort), "--ip", "127.0.0.1",
+    "--local-upstream", `127.0.0.1:${originPort}`, "--inspector-port", String(await freePort())]), {
     cwd: tmp, shell: WIN, detached: !WIN, env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" },
   });
   dev.stdout.on("data", (d) => { log += d; });
