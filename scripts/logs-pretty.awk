@@ -418,6 +418,14 @@ function schedline(msg,    job, dur, st) {
     word = msg; sub(/:.*/, "", word)
     lvl = (word ~ /^(ERROR|FATAL|PANIC)$/) ? "error" : (word == "WARNING" ? "warn" : "info")
     if (word ~ /^(LOG|ERROR|WARNING|FATAL|PANIC)$/) { msg = substr(msg, length(word) + 2); sub(/^ +/, "", msg) }
+    # Échec de sérialisation (SQLSTATE 40001) : Postgres annule une transaction
+    # Serializable concurrente et la journalise en ERROR, mais c'est le signal
+    # attendu pour que l'application la rejoue (Prisma : code P2034, rejoué par
+    # atomic() dans ArTest). Un échec définitif remonte dans les logs de l'app.
+    if (lvl == "error" && msg ~ /^could not serialize access /) {
+      lvl = "warn"
+      msg = msg GRY "  ↻ conflit de sérialisation, à rejouer par l'application" R
+    }
   }
   # PgBouncer : même en-tête que Postgres, niveau sans « : »
   # (« 2026-10-20 12:00:00.123 UTC [1] LOG listening on … »).
