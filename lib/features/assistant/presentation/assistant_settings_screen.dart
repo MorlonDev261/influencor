@@ -12,7 +12,9 @@ import '../data/llm_client.dart';
 import '../domain/chat_message.dart';
 import '../domain/llm_provider.dart';
 
-/// Where the user connects their preferred LLM (provider, key, model).
+/// Where the user connects their preferred LLM (provider, key, model). When
+/// the build fixes Degany's model (`DEGANY_USER_MODELS=false` in `.env`), only
+/// the confirmations and the memory are shown.
 class AssistantSettingsScreen extends ConsumerStatefulWidget {
   const AssistantSettingsScreen({super.key});
 
@@ -125,12 +127,17 @@ class _AssistantSettingsScreenState
     await _save();
     await _controller.setProvider(kind);
     if (!mounted) return;
-    setState(() => _load(ref.read(assistantConfigProvider), kind));
+    setState(() => _load(_userConfig, kind));
   }
+
+  /// The user's own settings (the form), never the build's model.
+  AssistantConfig get _userConfig =>
+      ref.read(assistantConfigControllerProvider).value ??
+      const AssistantConfig();
 
   Future<void> _run(Future<String> Function(LlmClient client) action) async {
     await _save();
-    final config = ref.read(assistantConfigProvider);
+    final config = _userConfig;
     final client = ref.read(llmClientFactoryProvider)(config);
     setState(() {
       _busy = true;
@@ -191,159 +198,174 @@ class _AssistantSettingsScreenState
     final kind = _shown!;
     final scheme = Theme.of(context).colorScheme;
     final suggestions = {..._models, ...kind.models}.toList();
+    final userModels = ref.watch(deganyEnvProvider).userModels;
+    final running = ref.watch(assistantConfigProvider);
 
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) _save();
+        if (didPop && userModels) _save();
       },
       child: Scaffold(
         appBar: AppBar(title: Text(strings.assistantSettings)),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(strings.assistantNotConfigured,
-                style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<LlmProviderKind>(
-              initialValue: kind,
-              isExpanded: true,
-              decoration: InputDecoration(
-                labelText: strings.llmProvider,
-                border: const OutlineInputBorder(),
-              ),
-              items: [
-                for (final k in LlmProviderKind.values)
-                  DropdownMenuItem(value: k, child: Text(k.label)),
-              ],
-              onChanged: (k) => k == null ? null : _selectProvider(k),
-            ),
-            const SizedBox(height: 16),
-            if (config.keysInPlainText) ...[
-              _PlainTextKeyWarning(
-                title: strings.keysInPlainTextTitle,
-                message: strings.keysInPlainTextMessage,
+            if (!userModels)
+              ListTile(
+                key: const ValueKey('assistant-managed-model'),
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.auto_awesome, color: scheme.primary),
+                title: Text(strings.deganyManagedModel),
+                subtitle: Text(running.isReady
+                    ? '${running.provider.label} · ${running.model}'
+                    : strings.deganyManagedMissing),
+              )
+            else ...[
+              Text(strings.assistantNotConfigured,
+                  style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<LlmProviderKind>(
+                initialValue: kind,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: strings.llmProvider,
+                  border: const OutlineInputBorder(),
+                ),
+                items: [
+                  for (final k in LlmProviderKind.values)
+                    DropdownMenuItem(value: k, child: Text(k.label)),
+                ],
+                onChanged: (k) => k == null ? null : _selectProvider(k),
               ),
               const SizedBox(height: 16),
-            ],
-            if (kind.needsKey || kind == LlmProviderKind.custom) ...[
-              TextField(
-                key: const ValueKey('assistant-api-key'),
-                controller: _key,
-                obscureText: _obscure,
-                autocorrect: false,
-                enableSuggestions: false,
-                onChanged: (_) => _scheduleSave(),
-                decoration: InputDecoration(
-                  labelText: strings.apiKey,
-                  border: const OutlineInputBorder(),
-                  helperText: strings.apiKeyLocal,
-                  helperMaxLines: 3,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                        _obscure ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                  ),
+              if (config.keysInPlainText) ...[
+                _PlainTextKeyWarning(
+                  title: strings.keysInPlainTextTitle,
+                  message: strings.keysInPlainTextMessage,
                 ),
-              ),
-              if (kind.keyUrl != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    icon: const Icon(Icons.open_in_new, size: 18),
-                    label: Text(strings.getApiKey),
-                    onPressed: () => launchUrl(Uri.parse(kind.keyUrl!),
-                        mode: LaunchMode.externalApplication),
-                  ),
-                ),
-              const SizedBox(height: 8),
-            ],
-            Autocomplete<String>(
-              key: ValueKey('model-$kind-${_models.length}'),
-              initialValue: TextEditingValue(text: _model.text),
-              optionsBuilder: (value) {
-                final q = value.text.toLowerCase();
-                return suggestions.where((m) => m.toLowerCase().contains(q));
-              },
-              onSelected: (m) {
-                _model.text = m;
-                _scheduleSave();
-              },
-              fieldViewBuilder: (context, controller, focus, onSubmit) {
-                return TextField(
-                  controller: controller,
-                  focusNode: focus,
+                const SizedBox(height: 16),
+              ],
+              if (kind.needsKey || kind == LlmProviderKind.custom) ...[
+                TextField(
+                  key: const ValueKey('assistant-api-key'),
+                  controller: _key,
+                  obscureText: _obscure,
                   autocorrect: false,
-                  onChanged: (v) {
-                    _model.text = v;
-                    _scheduleSave();
-                  },
+                  enableSuggestions: false,
+                  onChanged: (_) => _scheduleSave(),
                   decoration: InputDecoration(
-                    labelText: strings.llmModel,
+                    labelText: strings.apiKey,
                     border: const OutlineInputBorder(),
+                    helperText: strings.apiKeyLocal,
+                    helperMaxLines: 3,
                     suffixIcon: IconButton(
-                      tooltip: strings.loadModels,
-                      icon: const Icon(Icons.cloud_download_outlined),
-                      onPressed: _busy ? null : () => _loadModels(strings),
+                      icon: Icon(
+                          _obscure ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setState(() => _obscure = !_obscure),
                     ),
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _url,
-              autocorrect: false,
-              keyboardType: TextInputType.url,
-              onChanged: (_) {
-                setState(() {}); // refresh the error below
-                _scheduleSave();
-              },
-              decoration: InputDecoration(
-                labelText: strings.llmBaseUrl,
-                hintText: kind.baseUrl.isEmpty ? 'https://…/v1' : kind.baseUrl,
-                helperText: strings.llmBaseUrlHint,
-                helperMaxLines: 3,
-                errorText:
-                    _url.text.trim().isNotEmpty && !isSecureEndpoint(_url.text)
-                        ? strings.llmInsecureUrl
-                        : null,
-                errorMaxLines: 4,
-                border: const OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  key: const ValueKey('assistant-settings-save'),
-                  onPressed: _saving ? null : () => _saveNow(strings),
-                  icon: _saving
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.save_outlined),
-                  label: Text(strings.save),
                 ),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _test(strings),
-                  icon: _busy
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.wifi_tethering),
-                  label: Text(strings.testConnection),
+                if (kind.keyUrl != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: Text(strings.getApiKey),
+                      onPressed: () => launchUrl(Uri.parse(kind.keyUrl!),
+                          mode: LaunchMode.externalApplication),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+              ],
+              Autocomplete<String>(
+                key: ValueKey('model-$kind-${_models.length}'),
+                initialValue: TextEditingValue(text: _model.text),
+                optionsBuilder: (value) {
+                  final q = value.text.toLowerCase();
+                  return suggestions.where((m) => m.toLowerCase().contains(q));
+                },
+                onSelected: (m) {
+                  _model.text = m;
+                  _scheduleSave();
+                },
+                fieldViewBuilder: (context, controller, focus, onSubmit) {
+                  return TextField(
+                    controller: controller,
+                    focusNode: focus,
+                    autocorrect: false,
+                    onChanged: (v) {
+                      _model.text = v;
+                      _scheduleSave();
+                    },
+                    decoration: InputDecoration(
+                      labelText: strings.llmModel,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: strings.loadModels,
+                        icon: const Icon(Icons.cloud_download_outlined),
+                        onPressed: _busy ? null : () => _loadModels(strings),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _url,
+                autocorrect: false,
+                keyboardType: TextInputType.url,
+                onChanged: (_) {
+                  setState(() {}); // refresh the error below
+                  _scheduleSave();
+                },
+                decoration: InputDecoration(
+                  labelText: strings.llmBaseUrl,
+                  hintText:
+                      kind.baseUrl.isEmpty ? 'https://…/v1' : kind.baseUrl,
+                  helperText: strings.llmBaseUrlHint,
+                  helperMaxLines: 3,
+                  errorText: _url.text.trim().isNotEmpty &&
+                          !isSecureEndpoint(_url.text)
+                      ? strings.llmInsecureUrl
+                      : null,
+                  errorMaxLines: 4,
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    key: const ValueKey('assistant-settings-save'),
+                    onPressed: _saving ? null : () => _saveNow(strings),
+                    icon: _saving
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.save_outlined),
+                    label: Text(strings.save),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _test(strings),
+                    icon: _busy
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.wifi_tethering),
+                    label: Text(strings.testConnection),
+                  ),
+                ],
+              ),
+              if (_status != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _status!,
+                  style: TextStyle(
+                      color: _statusOk ? scheme.primary : scheme.error),
                 ),
               ],
-            ),
-            if (_status != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _status!,
-                style:
-                    TextStyle(color: _statusOk ? scheme.primary : scheme.error),
-              ),
             ],
             const Divider(height: 32),
             SwitchListTile(

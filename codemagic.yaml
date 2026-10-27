@@ -33,6 +33,14 @@ workflows:
           else
             echo "GOOGLE_SERVICE_INFO_PLIST absent : build sans push."
           fi
+      - name: .env de Degany (optionnel)
+        # Variable secrète DEGANY_DOTENV = contenu du .env (voir .env.example).
+        script: |
+          if [ -n "$DEGANY_DOTENV" ]; then
+            printf '%s\n' "$DEGANY_DOTENV" > .env
+          else
+            echo "DEGANY_DOTENV absent : Degany sans modèle fourni par l'app."
+          fi
       - name: Dépendances
         script: flutter pub get
       - name: Profils de signature
@@ -41,7 +49,9 @@ workflows:
         # Version et numéro de build lus dans pubspec.yaml (1.0.0+1).
         # App Store Connect refuse un second envoi avec le même numéro.
         script: |
-          flutter build ipa --release \
+          defines=""
+          [ -f .env ] && defines="--dart-define-from-file=.env"
+          flutter build ipa --release $defines \
             --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa

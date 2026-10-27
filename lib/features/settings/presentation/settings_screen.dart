@@ -78,9 +78,10 @@ class SettingsScreen extends ConsumerWidget {
   /// "Claude (Anthropic) · claude-opus-5-5", or a hint while not connected.
   String _assistantSubtitle(WidgetRef ref, AppStrings strings) {
     final config = ref.watch(assistantConfigProvider);
-    return config.isReady
-        ? '${config.provider.label} · ${config.model}'
-        : strings.assistantSettingsHint;
+    if (config.isReady) return '${config.provider.label} · ${config.model}';
+    return ref.watch(deganyEnvProvider).userModels
+        ? strings.assistantSettingsHint
+        : strings.deganyManagedMissing;
   }
 
   @override

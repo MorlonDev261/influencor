@@ -43,12 +43,11 @@ List<AgentTool> deganeoTools() => [
         description:
             "Deganeo : liste les métadonnées d'une image, vidéo ou PDF (GPS, "
             'appareil, dates, EXIF/XMP/IPTC, commentaires…) sans rien modifier. '
-            'Accepte un chemin de la bibliothèque ou un chemin absolu (fichiers '
-            "joints par l'utilisateur).",
+            'Uniquement pour un fichier du dossier de travail.',
         properties: {'path': sStr(pathHint)},
         required: ['path'],
         run: (a, ctx) async {
-          final path = ctx.resolve(a.str('path'), anywhere: true);
+          final path = ctx.resolve(a.str('path'));
           if (!await File(path).exists()) {
             throw ToolError('Fichier introuvable : ${a.str('path')}');
           }
@@ -75,7 +74,7 @@ List<AgentTool> deganeoTools() => [
             'demande-le d’abord avec ask_user.',
         properties: {
           'paths':
-              sStrList('Fichiers à nettoyer. $pathHint Ou chemins absolus.'),
+              sStrList('Fichiers du dossier de travail à nettoyer. $pathHint'),
           'save': sStr('Où enregistrer le résultat (défaut copy).',
               values: _saveModes),
           'folder': sStr('Pour save=library : dossier de destination. '
@@ -95,7 +94,7 @@ List<AgentTool> deganeoTools() => [
           for (final raw in a.strings('paths')) {
             String? temp;
             try {
-              final path = ctx.resolve(raw, anywhere: true);
+              final path = ctx.resolve(raw);
               if (!await File(path).exists()) {
                 throw ToolError('Fichier introuvable : $raw');
               }

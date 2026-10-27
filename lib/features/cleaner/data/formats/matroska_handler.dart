@@ -165,15 +165,55 @@ class MatroskaHandler extends FormatHandler {
     if (head == null || head.id != _ebml || head.size < 0) {
       throw const FormatException('Not a Matroska/WebM file');
     }
+    // Every Segment is cleaned (chained files hold several); anything else
+    // after them is voided: no player needs it and it may hold anything.
     var pos = head.end;
-    final seg = await _read(raf, pos, length);
-    if (seg == null || seg.id != _segment) {
-      throw const FormatException('Missing Segment');
+    var segments = 0;
+    while (pos < length) {
+      _Header? top;
+      try {
+        top = await _read(raf, pos, length);
+      } on FormatException {
+        top = null; // garbage: voided below
+        if (segments == 0) rethrow;
+      }
+      if (top != null && top.id == _segment) {
+        final segEnd = top.size < 0 ? length : top.end;
+        if (segEnd > length) throw const FormatException('Truncated Segment');
+        await _segmentTargets(
+            raf, top.payloadStart, segEnd, findings, caveats, targets);
+        segments++;
+        pos = segEnd;
+      } else if (top != null &&
+          const {_ebml, _void, _crc32}.contains(top.id) &&
+          top.size >= 0 &&
+          top.end <= length) {
+        pos = top.end;
+      } else {
+        if (segments == 0) throw const FormatException('Missing Segment');
+        if (length - pos >= 2) {
+          findings.add(MetadataFinding(
+              MetadataCategory.trailingData, 'data after Segment',
+              bytes: length - pos));
+          targets.add(_Target(pos, length - pos, null));
+        }
+        break;
+      }
     }
-    final segEnd = seg.size < 0 ? length : seg.end;
-    if (segEnd > length) throw const FormatException('Truncated Segment');
-    pos = seg.payloadStart;
+    if (segments == 0) throw const FormatException('Missing Segment');
+    return (HandlerResult(findings, caveats), targets);
+  }
 
+  /// Metadata targets among the level-1 elements of one Segment.
+  Future<void> _segmentTargets(
+    RandomAccessFile raf,
+    int start,
+    int segEnd,
+    List<MetadataFinding> findings,
+    Set<CleanCaveat> caveats,
+    List<_Target> targets,
+  ) async {
+    var pos = start;
     while (pos < segEnd) {
       final h = await _read(raf, pos, segEnd);
       if (h == null) break;
@@ -200,7 +240,6 @@ class MatroskaHandler extends FormatHandler {
         throw const FormatException('Unknown-size element');
       }
     }
-    return (HandlerResult(findings, caveats), targets);
   }
 
   /// Children of an unknown-size Cluster run until the next level-1 element.

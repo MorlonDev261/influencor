@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:influencor/core/l10n/app_strings.dart';
 import 'package:influencor/features/assistant/application/assistant_providers.dart';
 import 'package:influencor/features/assistant/data/assistant_config_store.dart';
+import 'package:influencor/features/assistant/data/degany_env.dart';
 import 'package:influencor/features/assistant/data/llm_client.dart';
 import 'package:influencor/features/assistant/domain/chat_message.dart';
 import 'package:influencor/features/assistant/domain/llm_provider.dart';
@@ -25,6 +26,52 @@ class _StaticConfigStore extends AssistantConfigStore {
 }
 
 void main() {
+  group('DeganyEnv (.env)', () {
+    const user = AssistantConfig(
+      provider: LlmProviderKind.openai,
+      providers: {LlmProviderKind.openai: ProviderSettings(apiKey: 'sk-user')},
+      memory: false,
+    );
+    const build = DeganyEnv(
+      userModels: false,
+      provider: LlmProviderKind.anthropic,
+      apiKey: 'sk-build',
+    );
+
+    test('a fixed model replaces the user model, keeping their other choices',
+        () {
+      final c = build.apply(user);
+      expect(c.provider, LlmProviderKind.anthropic);
+      expect(c.current.apiKey, 'sk-build');
+      expect(c.model, LlmProviderKind.anthropic.defaultModel);
+      expect(c.memory, isFalse);
+      expect(c.isReady, isTrue);
+    });
+
+    test('with user models, the build model only fills in until they choose',
+        () {
+      const env =
+          DeganyEnv(provider: LlmProviderKind.anthropic, apiKey: 'sk-build');
+      expect(env.apply(user).current.apiKey, 'sk-user');
+      expect(env.apply(const AssistantConfig()).current.apiKey, 'sk-build');
+      // Nothing usable in the build: the user's settings as they are.
+      expect(const DeganyEnv().apply(const AssistantConfig()).isReady, isFalse);
+    });
+
+    test('provider names from .env', () {
+      expect(DeganyEnv.providerNamed(' Anthropic '), LlmProviderKind.anthropic);
+      expect(DeganyEnv.providerNamed('openrouter'), LlmProviderKind.openrouter);
+      expect(DeganyEnv.providerNamed(''), isNull);
+      expect(DeganyEnv.providerNamed('nope'), isNull);
+    });
+
+    test('a build without .env lets users choose', () {
+      final env = DeganyEnv.fromBuild();
+      expect(env.userModels, isTrue);
+      expect(env.provider, isNull);
+    });
+  });
+
   group('isSecureEndpoint', () {
     test('HTTPS anywhere, plain HTTP only to this device', () {
       for (final ok in [
@@ -117,9 +164,11 @@ void main() {
   });
 
   group('settings screen', () {
-    Future<void> pump(WidgetTester tester, AssistantConfig config) async {
+    Future<void> pump(WidgetTester tester, AssistantConfig config,
+        {DeganyEnv env = const DeganyEnv()}) async {
       await tester.pumpWidget(ProviderScope(
         overrides: [
+          deganyEnvProvider.overrideWithValue(env),
           assistantConfigStoreProvider
               .overrideWithValue(_StaticConfigStore(config)),
           appStringsProvider.overrideWithValue(const AppStrings(Locale('fr'))),
@@ -155,6 +204,29 @@ void main() {
         ),
       );
       expect(find.text(strings.keysInPlainTextTitle), findsNothing);
+    });
+
+    testWidgets('a model fixed by the build hides provider, key and model',
+        (tester) async {
+      await pump(
+        tester,
+        const AssistantConfig(),
+        env: const DeganyEnv(
+          userModels: false,
+          provider: LlmProviderKind.anthropic,
+          model: 'claude-sonnet-5-5',
+          apiKey: 'sk-build-secret',
+        ),
+      );
+      expect(find.byKey(const ValueKey('assistant-api-key')), findsNothing);
+      expect(find.text(strings.llmProvider), findsNothing);
+      expect(find.text(strings.llmModel), findsNothing);
+      expect(find.text(strings.deganyManagedModel), findsOneWidget);
+      expect(find.textContaining('claude-sonnet-5-5'), findsOneWidget);
+      // The key itself is never shown.
+      expect(find.textContaining('sk-build-secret'), findsNothing);
+      // Confirmations and memory stay the user's choice.
+      expect(find.byKey(const ValueKey('assistant-memory')), findsOneWidget);
     });
 
     testWidgets('flags a plain HTTP address to another machine',

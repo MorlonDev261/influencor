@@ -5,11 +5,33 @@ import '../../domain/clean_report.dart';
 import '../binary.dart';
 import '../format_handler.dart';
 
-/// AVI (RIFF): removes the top-level `LIST INFO` (title, software, creation
-/// date…) and `IDIT` date stamps. `idx1` offsets are relative to `movi`, so
-/// dropping chunks that precede it keeps the index valid.
+/// AVI (RIFF). Metadata chunks are blanked **in place**: each one becomes a
+/// `JUNK` chunk of the same size filled with zeros, so no byte moves and every
+/// offset stays valid — `idx1` (relative *or* absolute offsets) and the
+/// OpenDML `indx` super-index (always absolute).
+///
+/// Blanked wherever they sit (top level or inside `hdrl` / `strl` / `odml`):
+/// `LIST INFO` (title, software, creation date…), `IDIT` / `ISMP` date and
+/// timecode stamps, stream names (`strn`), any unknown chunk or list (camera
+/// vendor blocks such as `LIST ncdt`), and the content of `JUNK` padding,
+/// where some cameras write their make and model. Data after the RIFF chunk is
+/// dropped.
 class AviHandler extends ByteFormatHandler {
   const AviHandler();
+
+  /// Chunks needed to play the file, per enclosing list ('' = top level).
+  static const _keep = <String, Set<String>>{
+    '': {'idx1'},
+    'hdrl': {'avih'},
+    'strl': {'strh', 'strf', 'strd', 'indx', 'vprp'},
+    'odml': {'dmlh'},
+  };
+
+  /// Lists walked into, per enclosing list. `movi` (the frames) is kept as is.
+  static const _lists = <String, Set<String>>{
+    '': {'hdrl'},
+    'hdrl': {'strl', 'odml'},
+  };
 
   @override
   MediaFormat get format => MediaFormat.avi;
@@ -28,41 +50,85 @@ class AviHandler extends ByteFormatHandler {
     final declared = u32le(b, 4) + 8;
     final fileEnd = declared < b.length ? declared : b.length;
     final findings = <MetadataFinding>[];
-    final body = BytesBuilder(copy: false);
-    var offset = 12;
-    while (offset + 8 <= fileEnd) {
-      final id = fourcc(b, offset);
-      final size = u32le(b, offset + 4);
-      final end = offset + 8 + size + (size.isOdd ? 1 : 0);
-      if (offset + 8 + size > fileEnd) {
-        throw const FormatException('Truncated AVI');
-      }
-      final isInfo =
-          id == 'LIST' && size >= 4 && startsWithAscii(b, offset + 8, 'INFO');
-      if (isInfo || id == 'IDIT') {
-        findings.add(MetadataFinding(
-          isInfo ? MetadataCategory.container : MetadataCategory.dateTime,
-          isInfo ? 'LIST INFO' : 'IDIT',
-          bytes: end - offset,
-          entries: isInfo
-              ? _infoEntries(b, offset + 12, offset + 8 + size)
-              : [
-                  MetadataEntry(
-                      'IDIT', latin1Text(b, offset + 8, offset + 8 + size))
-                ],
-        ));
-      } else {
-        body.add(b.sublist(offset, end > fileEnd ? fileEnd : end));
-      }
-      offset = end;
+    if (b.length > declared) {
+      findings.add(MetadataFinding(
+          MetadataCategory.trailingData, 'data after RIFF',
+          bytes: b.length - declared));
     }
-    if (out != null) {
-      final payload = body.takeBytes();
-      out
-        ..add(ascii4('RIFF'))
-        ..add(le32(payload.length + 4))
-        ..add(ascii4('AVI '))
-        ..add(payload);
+    final copy = out == null ? null : Uint8List.fromList(b.sublist(0, fileEnd));
+
+    // Turns [start, end) into a zero-filled JUNK chunk of the same size.
+    void blank(int start, int end) {
+      if (copy == null) return;
+      copy.setRange(start, start + 4, ascii4('JUNK'));
+      copy.fillRange(start + 8, end, 0);
+    }
+
+    void walk(int from, int to, String list) {
+      var offset = from;
+      while (offset + 8 <= to) {
+        final id = fourcc(b, offset);
+        final size = u32le(b, offset + 4);
+        final dataStart = offset + 8;
+        final dataEnd = dataStart + size;
+        if (dataEnd > to) throw const FormatException('Truncated AVI');
+        final padded = dataEnd + (size.isOdd ? 1 : 0);
+        final end = padded > to ? to : padded;
+        final listType =
+            id == 'LIST' && size >= 4 ? fourcc(b, dataStart) : null;
+        if (listType == 'INFO') {
+          findings.add(MetadataFinding(
+            MetadataCategory.container,
+            'LIST INFO',
+            bytes: end - offset,
+            entries: _infoEntries(b, dataStart + 4, dataEnd),
+          ));
+          blank(offset, end);
+        } else if (listType != null &&
+            (_lists[list]?.contains(listType) ?? false)) {
+          walk(dataStart + 4, dataEnd, listType);
+        } else if (listType == 'movi' && list.isEmpty) {
+          // Frames: untouched.
+        } else if (id == 'JUNK') {
+          if (b.sublist(dataStart, dataEnd).any((v) => v != 0)) {
+            findings.add(MetadataFinding(
+                MetadataCategory.container, 'JUNK data',
+                bytes: end - offset,
+                entries: [
+                  MetadataEntry('JUNK', latin1Text(b, dataStart, dataEnd)),
+                ]));
+            blank(offset, end);
+          }
+        } else if (id == 'IDIT' || id == 'ISMP') {
+          findings.add(MetadataFinding(MetadataCategory.dateTime, id,
+              bytes: end - offset,
+              entries: [MetadataEntry(id, latin1Text(b, dataStart, dataEnd))]));
+          blank(offset, end);
+        } else if (id == 'strn') {
+          findings.add(MetadataFinding(MetadataCategory.comment, 'stream name',
+              bytes: end - offset,
+              entries: [
+                MetadataEntry('Stream name', latin1Text(b, dataStart, dataEnd)),
+              ]));
+          blank(offset, end);
+        } else if (listType == null && (_keep[list]?.contains(id) ?? false)) {
+          // Needed for playback.
+        } else {
+          final label = listType == null ? id : 'LIST $listType';
+          findings.add(MetadataFinding(MetadataCategory.container, label,
+              bytes: end - offset,
+              entries: [MetadataEntry(label, sizeLabel(end - offset))]));
+          blank(offset, end);
+        }
+        offset = end;
+      }
+    }
+
+    walk(12, fileEnd, '');
+    if (copy != null) {
+      // The RIFF size must match what is written (trailing data dropped).
+      copy.setRange(4, 8, le32(fileEnd - 8));
+      out!.add(copy);
     }
     return HandlerResult(findings);
   }

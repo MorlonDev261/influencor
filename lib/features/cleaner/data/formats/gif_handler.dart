@@ -67,8 +67,9 @@ class GifHandler extends ByteFormatHandler {
         MetadataFinding? finding;
         if (label == 0xFF) {
           need(i + 14);
-          final isAnim = startsWithAscii(b, i + 3, 'NETSCAPE2.0') ||
-              startsWithAscii(b, i + 3, 'ANIMEXTS1.0');
+          final isAnim = b[i + 2] == 11 &&
+              (startsWithAscii(b, i + 3, 'NETSCAPE2.0') ||
+                  startsWithAscii(b, i + 3, 'ANIMEXTS1.0'));
           keep = isAnim;
           if (!isAnim) {
             final isXmp = startsWithAscii(b, i + 3, 'XMP DataXMP');
@@ -88,6 +89,18 @@ class GifHandler extends ByteFormatHandler {
               MetadataCategory.container, 'unknown extension');
         }
         i = skipSubBlocks(i + 2);
+        if (keep && label == 0xFF) {
+          // Loop extension: only its loop-count sub-block is needed; any
+          // other sub-block could carry arbitrary data.
+          final canonical = _loopExtension(b, start, i);
+          if (canonical.length != i - start) {
+            findings.add(MetadataFinding(
+                MetadataCategory.container, 'application extension data',
+                bytes: i - start - canonical.length));
+          }
+          out?.add(canonical);
+          continue;
+        }
         if (finding != null) {
           findings.add(finding.copyWith(
             bytes: i - start,
@@ -112,6 +125,24 @@ class GifHandler extends ByteFormatHandler {
     }
     if (!sawTrailer) out?.addByte(0x3B);
     return HandlerResult(findings);
+  }
+
+  /// The NETSCAPE2.0 / ANIMEXTS1.0 block in [start, end) reduced to its
+  /// 14-byte header, its loop-count sub-block (`03 01 lo hi`) and terminator.
+  static Uint8List _loopExtension(Uint8List b, int start, int end) {
+    final out = BytesBuilder(copy: false)..add(b.sublist(start, start + 14));
+    var i = start + 14;
+    var looped = false;
+    while (i < end && b[i] != 0) {
+      final size = b[i];
+      if (!looped && size == 3 && b[i + 1] == 1) {
+        out.add(b.sublist(i, i + 4));
+        looped = true;
+      }
+      i += 1 + size;
+    }
+    out.addByte(0);
+    return out.takeBytes();
   }
 
   /// Concatenated sub-blocks of a comment extension starting at [from].

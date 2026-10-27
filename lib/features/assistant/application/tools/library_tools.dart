@@ -668,36 +668,6 @@ List<AgentTool> libraryTools() => [
         },
       ),
       AgentTool(
-        name: 'import_files',
-        label: 'Importation',
-        description: "Copie (ou déplace) des fichiers/dossiers de l'appareil, "
-            'donnés en chemins absolus, dans la bibliothèque.',
-        properties: {
-          'sources': sStrList('Chemins absolus sur l’appareil.'),
-          'destination': sStr('Dossier de destination. $pathHint'),
-          'move': sBool('Supprimer les originaux après copie (défaut false).'),
-        },
-        required: ['sources'],
-        confirm: (a, ctx) => a.flag('move')
-            ? 'Importer en DÉPLAÇANT (les originaux seront supprimés de leur '
-                'emplacement) :\n${a.strings('sources').join('\n')}'
-            : null,
-        run: (a, ctx) async {
-          final dest = ctx.resolve(a.optStr('destination'));
-          final sources = [
-            for (final s in a.strings('sources'))
-              ctx.resolve(s, anywhere: true),
-          ];
-          final failed = await ctx.library
-              .importPaths(dest, sources, move: a.flag('move'));
-          return {
-            'destination': ctx.rel(dest),
-            'imported': sources.length - failed.length,
-            if (failed.isNotEmpty) 'failed': failed,
-          };
-        },
-      ),
-      AgentTool(
         name: 'set_favorite',
         label: 'Favoris',
         description: 'Ajoute ou retire des éléments des favoris.',

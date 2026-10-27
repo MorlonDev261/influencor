@@ -9,8 +9,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/l10n/app_strings.dart';
 import '../../../core/picker/app_file_picker.dart';
 import '../../../core/picker/pick_mode.dart';
+import '../../../core/providers/workspace_providers.dart';
 import '../../../core/widgets/app_dialog.dart';
 import '../application/assistant_providers.dart';
+import 'assistant_history_screen.dart';
 import 'assistant_settings_screen.dart';
 import 'assistant_transcript.dart';
 
@@ -91,24 +93,50 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
     _chat.send(message, attachments: files);
   }
 
+  /// Only files of the workspace can be attached: Degany works nowhere else.
   void _addAttachments(Iterable<String> paths) {
-    final fresh = [
-      for (final path in paths)
-        if (path.isNotEmpty && !_attachments.contains(path)) path,
-    ];
+    final strings = ref.read(appStringsProvider);
+    final root = ref.read(workspaceRootProvider);
+    if (root == null) {
+      _snack(strings.needWorkspace);
+      return;
+    }
+    final fresh = <String>[];
+    var outside = 0;
+    for (final path in paths) {
+      if (path.isEmpty || _attachments.contains(path)) continue;
+      if (isInWorkspace(root, path)) {
+        fresh.add(path);
+      } else {
+        outside++;
+      }
+    }
+    if (outside > 0) _snack(strings.outsideWorkspace(outside));
     if (fresh.isEmpty) return;
     setState(() => _attachments.addAll(fresh));
   }
 
   Future<void> _pickAttachments(PickMode mode) async {
     final strings = ref.read(appStringsProvider);
+    final root = ref.read(workspaceRootProvider);
+    if (root == null) {
+      _snack(strings.needWorkspace);
+      return;
+    }
     final paths = await AppFilePicker.pick(
       context,
       mode: mode,
       allowMultiple: true,
       title: strings.attach,
+      root: root,
     );
     if (mounted) _addAttachments(paths);
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// Follows the answer while it streams, unless the user scrolled up to
@@ -361,10 +389,10 @@ class _ChatHeader extends ConsumerWidget {
             icon: const Icon(Icons.add_comment_outlined),
           ),
           IconButton(
-            key: const ValueKey('assistant-settings'),
-            tooltip: strings.assistantSettings,
-            onPressed: () => openAssistantSettings(context),
-            icon: const Icon(Icons.tune),
+            key: const ValueKey('assistant-history'),
+            tooltip: strings.chatHistory,
+            onPressed: () => openChatHistory(context),
+            icon: const Icon(Icons.history),
           ),
         ],
       ),
@@ -387,6 +415,8 @@ class _Welcome extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final strings = ref.watch(appStringsProvider);
     final theme = Theme.of(context);
+    // The build fixes the model: there is nothing for the user to connect.
+    final managed = !ref.watch(deganyEnvProvider).userModels;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -404,20 +434,24 @@ class _Welcome extends ConsumerWidget {
                   textAlign: TextAlign.center),
               const SizedBox(height: 8),
               Text(
-                ready ? strings.assistantIntro : strings.assistantNotConfigured,
+                ready
+                    ? strings.assistantIntro
+                    : managed
+                        ? strings.deganyManagedMissing
+                        : strings.assistantNotConfigured,
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
-              if (!ready)
+              if (!ready && !managed)
                 FilledButton.icon(
                   key: const ValueKey('assistant-connect'),
                   onPressed: () => openAssistantSettings(context),
                   icon: const Icon(Icons.link),
                   label: Text(strings.assistantConnect),
                 )
-              else
+              else if (ready)
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,

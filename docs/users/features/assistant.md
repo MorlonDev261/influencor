@@ -74,11 +74,16 @@ bibliothèque).
 2. Envoyez, avec ou sans message (« nettoie pour Instagram »…).
 3. L'assistant analyse les métadonnées avec Deganeo, puis vous demande où
    enregistrer : **Copie à côté de l'original**, **Remplacer l'original** ou
-   **Ranger dans la bibliothèque** (et dans quel dossier). Touchez un choix
-   ou écrivez votre réponse.
+   **Ranger dans un autre dossier** (et lequel). Touchez un choix ou écrivez
+   votre réponse.
 
-Quand le sélecteur de photos a fourni une copie temporaire du fichier
-(fréquent sur Android), seul le rangement dans la bibliothèque est proposé.
+## Ce que l'assistant peut atteindre
+
+Degany travaille **uniquement dans votre dossier de travail**. Il ne lit, ne
+modifie et ne nettoie aucun fichier ailleurs sur l'appareil, même si on le lui
+demande. Le trombone n'affiche que les fichiers du dossier de travail ; un
+fichier venu d'ailleurs (glissé sur le chat) est ignoré. Pour le confier à
+Degany, importez-le d'abord dans la bibliothèque.
 
 ## Sécurité
 
@@ -87,5 +92,8 @@ original, l'assistant vous demande d'**Autoriser** ou **Refuser**. Quand il
 réécrit une note, l'ancienne version est gardée dans la corbeille.
 Le bouton ■ arrête l'assistant à tout moment.
 
-La conversation est conservée quand vous fermez l'app ; « Nouvelle
-conversation » l'efface.
+La conversation est conservée quand vous fermez l'app. « Nouvelle
+conversation » en commence une autre sans effacer la précédente : le bouton
+**historique**, juste à droite, liste vos conversations précédentes. Touchez-en
+une pour la reprendre là où vous l'aviez laissée, ou la corbeille pour la
+supprimer. Les conversations restent sur votre appareil.

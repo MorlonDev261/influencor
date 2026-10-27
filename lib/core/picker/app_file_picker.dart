@@ -23,6 +23,10 @@ import 'browser_launcher_stub.dart'
 abstract final class AppFilePicker {
   /// Returns the selected absolute paths (empty if the user cancels). For
   /// [PickMode.directory] the list holds at most one path.
+  ///
+  /// With [root] (the workspace), only what is inside that folder can be
+  /// chosen: the in-app browser / gallery opens there and cannot leave it, on
+  /// every platform (system pickers would show the whole device).
   static Future<List<String>> pick(
     BuildContext context, {
     required PickMode mode,
@@ -30,7 +34,19 @@ abstract final class AppFilePicker {
     String? title,
     String? initialDirectory,
     String? actionLabel,
+    String? root,
   }) {
+    if (root != null && !kIsWeb) {
+      return launcher.launchInAppBrowser(
+        context,
+        mode: mode,
+        allowMultiple: allowMultiple,
+        title: title,
+        initialDirectory: initialDirectory,
+        actionLabel: actionLabel,
+        root: root,
+      );
+    }
     if (_isIOS && mode != PickMode.directory) {
       return _pickIOS(context, mode, allowMultiple, title);
     }

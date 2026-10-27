@@ -2,6 +2,11 @@
 
 [← Documentation développeur](../README.md)
 
+Le modèle de Degany fourni par l'app (clé API, choix laissé ou non à
+l'utilisateur) vient de `.env` (voir `.env.example`) : les scripts
+`tools/build_*_release.ps1` ajoutent `--dart-define-from-file=.env` quand le
+fichier existe (pas pour le web). Détails : [Degany](../architecture/assistant.md).
+
 ## Android APK release
 
 À la racine:

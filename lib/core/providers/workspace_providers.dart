@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
 import '../services/workspace_service.dart';
 
@@ -37,3 +38,15 @@ final workspaceControllerProvider =
 final workspaceRootProvider = Provider<String?>((ref) {
   return ref.watch(workspaceControllerProvider).value;
 });
+
+/// Whether [path] is the workspace [root] or one of its files/folders, outside
+/// the hidden `.clipboard` folder that holds the app's own data (trash, tasks,
+/// accounting…). False when no workspace is chosen.
+bool isInWorkspace(String? root, String path) {
+  if (root == null || root.isEmpty || path.trim().isEmpty) return false;
+  final r = p.normalize(p.absolute(root));
+  final abs = p.normalize(p.absolute(path));
+  if (p.equals(abs, r)) return true;
+  if (!p.isWithin(r, abs)) return false;
+  return !p.split(p.relative(abs, from: r)).contains('.clipboard');
+}

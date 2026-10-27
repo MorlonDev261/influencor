@@ -60,6 +60,34 @@ class AppStrings {
       );
   String get newConversation =>
       _t('Nouvelle conversation', 'New conversation', mg: 'Resaka vaovao');
+  String get deganyManagedModel =>
+      _t('Modèle fourni par l’application', 'Model provided by the app',
+          mg: 'Modely omen’ny fampiharana');
+  String get deganyManagedMissing => _t(
+      'Degany n’est pas configuré dans cette version de l’application.',
+      'Degany is not set up in this version of the app.',
+      mg: 'Tsy voaomana amin’ity versiona ity i Degany.');
+  String get chatHistory =>
+      _t('Conversations précédentes', 'Previous conversations',
+          mg: 'Resaka teo aloha');
+  String get chatHistoryEmpty => _t(
+      'Aucune conversation enregistrée pour le moment.',
+      'No saved conversation yet.',
+      mg: 'Mbola tsy misy resaka voatahiry.');
+  String get chatUntitled =>
+      _t('Conversation sans titre', 'Untitled conversation',
+          mg: 'Resaka tsy misy lohateny');
+  String get chatCurrent => _t('En cours', 'Current', mg: 'Ankehitriny');
+  String get chatDelete =>
+      _t('Supprimer la conversation', 'Delete conversation',
+          mg: 'Fafao ny resaka');
+  String get chatDeleteConfirm => _t(
+      'Cette conversation sera supprimée de cet appareil.',
+      'This conversation will be deleted from this device.',
+      mg: 'Ho voafafa amin’ity fitaovana ity ity resaka ity.');
+  String get chatOpenFailed => _t('Impossible de rouvrir cette conversation.',
+      'This conversation could not be reopened.',
+      mg: 'Tsy azo sokafana indray ity resaka ity.');
   String get stop => _t('Arrêter', 'Stop', mg: 'Atsaharo');
   String get thinking => _t('Réflexion', 'Thinking', mg: 'Fisainana');
   String get attach => _t('Joindre', 'Attach', mg: 'Ampiarahina');
@@ -327,6 +355,14 @@ class AppStrings {
         'Maximum $max fichiers à la fois : les suivants ont été ignorés.',
         'Maximum $max files at a time: the rest were ignored.',
         mg: 'Rakitra $max no azo ampiasaina indray mandeha: nafoy ny sisa.',
+      );
+  String outsideWorkspace(int n) => _t(
+        '$n fichier(s) hors du dossier de travail ignoré(s) : importez-les '
+            "d'abord dans la bibliothèque.",
+        '$n file(s) outside the working folder ignored: import them into the '
+            'library first.',
+        mg: 'Rakitra $n ivelan’ny dossier fiasana nafoy: ampidiro ao amin’ny '
+            'tranomboky aloha.',
       );
   String filesSaved(int n) => _t(
         '$n fichier(s) enregistré(s)',

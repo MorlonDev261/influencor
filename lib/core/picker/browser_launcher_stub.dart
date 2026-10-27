@@ -12,6 +12,7 @@ Future<List<String>> launchInAppBrowser(
   String? title,
   String? initialDirectory,
   String? actionLabel,
+  String? root,
 }) async =>
     const [];
 

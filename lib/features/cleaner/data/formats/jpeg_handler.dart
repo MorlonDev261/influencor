@@ -99,10 +99,17 @@ class JpegHandler extends ByteFormatHandler {
         var drop = true;
         if (m == 0xE0 && startsWithAscii(b, p, 'JFIF\u0000')) {
           drop = false;
-          if (pe - p >= 14 && (b[p + 12] != 0 || b[p + 13] != 0)) {
-            findings.add(MetadataFinding(
-                MetadataCategory.thumbnail, 'JFIF thumbnail',
-                bytes: size));
+          if (pe - p < 14) {
+            drop = true; // truncated header: nothing a decoder needs
+          } else if (size != 18 || b[p + 12] != 0 || b[p + 13] != 0) {
+            // A thumbnail, or bytes after the header (anything can hide
+            // there): keep the 14-byte header only.
+            findings.add(b[p + 12] != 0 || b[p + 13] != 0
+                ? MetadataFinding(MetadataCategory.thumbnail, 'JFIF thumbnail',
+                    bytes: size)
+                : MetadataFinding(
+                    MetadataCategory.container, 'data after JFIF header',
+                    bytes: size - 18));
             final fixed =
                 Uint8List.fromList(b.sublist(seg.start, seg.start + 18));
             fixed[2] = 0;
@@ -114,8 +121,21 @@ class JpegHandler extends ByteFormatHandler {
         } else if (m == 0xE0 && startsWithAscii(b, p, 'JFXX')) {
           f = MetadataFinding(MetadataCategory.thumbnail, 'JFXX thumbnail',
               bytes: size);
-        } else if (m == 0xEE && startsWithAscii(b, p, 'Adobe')) {
+        } else if (m == 0xEE &&
+            startsWithAscii(b, p, 'Adobe') &&
+            pe - p >= 12) {
           drop = false; // colour transform flag: needed to decode correctly
+          if (size != 16) {
+            // Only the 12-byte payload is defined; drop anything after it.
+            findings.add(MetadataFinding(
+                MetadataCategory.container, 'data after Adobe header',
+                bytes: size - 16));
+            final fixed =
+                Uint8List.fromList(b.sublist(seg.start, seg.start + 16));
+            fixed[2] = 0;
+            fixed[3] = 14;
+            rewrite[s] = fixed;
+          }
         } else if (m == 0xE2 && startsWithAscii(b, p, 'ICC_PROFILE\u0000')) {
           final k = options.keepColorProfile;
           drop = !k;

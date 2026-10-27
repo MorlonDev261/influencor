@@ -12,6 +12,7 @@ import 'package:influencor/features/assistant/application/assistant_providers.da
 import 'package:influencor/features/assistant/application/tools/deganeo_tools.dart';
 import 'package:influencor/features/assistant/data/assistant_config_store.dart';
 import 'package:influencor/features/assistant/data/chat_store.dart';
+import 'package:influencor/features/assistant/data/degany_env.dart';
 import 'package:influencor/features/assistant/data/llm_client.dart';
 import 'package:influencor/features/assistant/data/user_profile_store.dart';
 import 'package:influencor/features/assistant/domain/chat_message.dart';
@@ -183,11 +184,13 @@ void main() {
   late Directory root;
   late Directory appData;
   late File chatFile;
+  late Directory chatDir;
 
   setUp(() async {
     root = await Directory.systemTemp.createTemp('influencor_agent_');
     appData = await Directory.systemTemp.createTemp('influencor_appdata_');
     chatFile = File(p.join(appData.path, 'assistant_chat.json'));
+    chatDir = Directory(p.join(appData.path, 'assistant_chats'));
   });
 
   tearDown(() async {
@@ -203,8 +206,11 @@ void main() {
     _ScriptedClient client, {
     _MemorySecrets? secrets,
     bool memory = true,
+    DeganyEnv env = const DeganyEnv(),
+    List<AssistantConfig>? used,
   }) async {
     final c = ProviderContainer(overrides: [
+      deganyEnvProvider.overrideWithValue(env),
       settingsServiceProvider.overrideWithValue(_FakeSettings()),
       workspaceRootProvider.overrideWithValue(root.path),
       assistantConfigStoreProvider
@@ -212,14 +218,38 @@ void main() {
       userProfileStoreProvider.overrideWithValue(
           UserProfileStore(secrets: secrets ?? _MemorySecrets())),
       chatStoreProvider
-          .overrideWithValue(ChatStore(file: () async => chatFile)),
-      llmClientFactoryProvider.overrideWithValue((_) => client),
+          .overrideWithValue(ChatStore(directory: () async => chatDir)),
+      llmClientFactoryProvider.overrideWithValue((config) {
+        used?.add(config);
+        return client;
+      }),
       appPrivateDirectoriesProvider.overrideWith((ref) async => [appData.path]),
     ]);
     addTearDown(c.dispose);
     await c.read(assistantConfigControllerProvider.future);
     return c;
   }
+
+  test('a model fixed in .env is the one Degany talks to', () async {
+    final used = <AssistantConfig>[];
+    final c = await container(
+      _ScriptedClient([(_) => _text('ok')]),
+      env: const DeganyEnv(
+        userModels: false,
+        provider: LlmProviderKind.anthropic,
+        model: 'claude-sonnet-5-5',
+        apiKey: 'sk-from-env',
+      ),
+      used: used,
+    );
+    await c.read(assistantChatProvider.notifier).send('salut');
+    expect(used.single.provider, LlmProviderKind.anthropic);
+    expect(used.single.model, 'claude-sonnet-5-5');
+    expect(used.single.current.apiKey, 'sk-from-env');
+    // The user's own settings are left as they were.
+    expect(c.read(assistantConfigControllerProvider).value!.current.apiKey,
+        'sk-test');
+  });
 
   group('API keys', () {
     test('live in the secure storage, never in the settings file', () async {
@@ -311,7 +341,8 @@ void main() {
     ]));
     await first.read(assistantChatProvider.notifier).send('mes tags ?');
     await first.read(assistantChatProvider.notifier).pendingSave;
-    expect(chatFile.existsSync(), isTrue);
+    final store = ChatStore(directory: () async => chatDir);
+    expect(await store.currentId(), isNotNull);
 
     // A new app session with the same storage.
     final client = _ScriptedClient([(_) => _text('Toujours aucun.')]);
@@ -327,10 +358,69 @@ void main() {
     expect(client.requests.single.where((m) => m.role == ChatRole.user),
         hasLength(2));
 
-    // A new conversation forgets it, on disk too.
+    // A new conversation starts empty but keeps the old one in the history.
     second.read(assistantChatProvider.notifier).clear();
     await second.read(assistantChatProvider.notifier).pendingSave;
+    expect(await store.currentId(), isNull);
+    final chats = await store.list();
+    expect(chats, hasLength(1));
+    expect(chats.single.title, 'mes tags ?');
+  });
+
+  test('previous conversations can be reopened and deleted', () async {
+    final client = _ScriptedClient([
+      (_) => _text('réponse A'),
+      (_) => _text('réponse B'),
+      (h) =>
+          _text('suite A, ${h.where((m) => m.role == ChatRole.user).length}'),
+    ]);
+    final c = await container(client);
+    final chat = c.read(assistantChatProvider.notifier);
+    await chat.send('sujet A');
+    await chat.pendingSave;
+    final a = chat.currentChatId!;
+    chat.clear();
+    await chat.send('sujet B');
+    await chat.pendingSave;
+    final b = chat.currentChatId!;
+    expect(b, isNot(a));
+
+    final history = await c.read(chatHistoryProvider.future);
+    expect(history.map((h) => h.title), ['sujet B', 'sujet A']);
+
+    // Back to A, where it was left: the model gets A's context, not B's.
+    expect(await chat.open(a), isTrue);
+    expect(c.read(assistantChatProvider).items.first.text, 'sujet A');
+    await chat.send('et ensuite ?');
+    expect(c.read(assistantChatProvider).items.last.text, 'suite A, 2');
+    await chat.pendingSave;
+    expect(await ChatStore(directory: () async => chatDir).currentId(), a);
+
+    // Deleting the open conversation leaves an empty chat.
+    await chat.delete(a);
+    expect(c.read(assistantChatProvider).items, isEmpty);
+    final left = await c.read(chatHistoryProvider.future);
+    expect(left.map((h) => h.id), [b]);
+    expect(await chat.open(a), isFalse);
+  });
+
+  test('the conversation of an older version moves into the history', () async {
+    chatFile.writeAsStringSync(jsonEncode({
+      'version': 1,
+      'items': [
+        {'kind': 'user', 'text': 'ancienne question'},
+        {'kind': 'assistant', 'text': 'ancienne réponse'},
+      ],
+      'history': [
+        {'role': 'user', 'text': 'ancienne question'},
+        {'role': 'assistant', 'text': 'ancienne réponse'},
+      ],
+    }));
+    final c = await container(_ScriptedClient([]));
+    await c.read(assistantChatProvider.notifier).restored;
+    expect(c.read(assistantChatProvider).items.first.text, 'ancienne question');
     expect(chatFile.existsSync(), isFalse);
+    expect(await c.read(chatHistoryProvider.future), hasLength(1));
   });
 
   test('a very long conversation keeps only what fits, from a user turn',
@@ -369,7 +459,7 @@ void main() {
       workspaceRootProvider.overrideWithValue(root.path),
       assistantConfigStoreProvider.overrideWithValue(_FakeConfigStore()),
       chatStoreProvider
-          .overrideWithValue(ChatStore(file: () async => chatFile)),
+          .overrideWithValue(ChatStore(directory: () async => chatDir)),
       llmClientFactoryProvider.overrideWithValue((_) => client),
     ]);
     addTearDown(c.dispose);
@@ -572,50 +662,95 @@ void main() {
     expect(results.map((r) => r.isError), [true, true]);
   });
 
-  test('the app data folder is off limits, even by absolute path', () async {
+  test('nothing outside the workspace is reachable, even by absolute path',
+      () async {
     final settings = File(p.join(appData.path, 'assistant_settings.json'))
       ..writeAsStringSync('{"providers":{}}');
     final outside = await Directory.systemTemp.createTemp('influencor_out_');
     addTearDown(() => outside.delete(recursive: true));
-    final photo = File(p.join(outside.path, 'photo.txt'))
-      ..writeAsStringSync('ok');
+    final photo = File(p.join(outside.path, 'photo.jpg'))
+      ..writeAsBytesSync(jpegWithMetadata());
+    final original = photo.readAsBytesSync();
     final client = _ScriptedClient([
       (_) => _calls([
-            (
-              'import_files',
-              {
-                'sources': [settings.path],
-              }
-            ),
-            (
-              'import_files',
-              {
-                'sources': [appData.path],
-              }
-            ),
+            ('deganeo_inspect', {'path': settings.path}),
             ('deganeo_inspect', {'path': chatFile.path}),
+            ('deganeo_inspect', {'path': photo.path}),
+            ('read_note', {'path': photo.path}),
             (
-              'import_files',
+              'deganeo_clean',
               {
-                'sources': [photo.path],
+                'paths': [photo.path],
+                'save': 'replace',
               }
             ),
           ]),
-      (_) => _text('fait'),
+      (_) => _text('non'),
     ]);
     final c = await container(client);
-    await c.read(assistantChatProvider.notifier).send('importe');
+    final chat = c.read(assistantChatProvider.notifier);
+    chat.confirmHandler = (_, __) async => true;
+    await chat.send('nettoie');
 
     final results = client.requests[1].last.toolResults;
-    expect(results.map((r) => r.isError), [true, true, true, false]);
-    expect(results.first.content, contains('données internes'));
-    expect(results.last.content, contains('"imported": 1'));
-    // Nothing of the app's data ended up in the workspace.
-    final copied = root
-        .listSync(recursive: true)
-        .map((e) => p.basename(e.path))
-        .where((n) => n.startsWith('assistant_'));
-    expect(copied, isEmpty);
+    expect(results.take(4).map((r) => r.isError), everyElement(isTrue));
+    for (final r in results) {
+      expect(r.content, contains('hors du dossier de travail'));
+    }
+    expect(photo.readAsBytesSync(), original);
+    // import_files is gone: no tool brings outside files in.
+    expect(c.read(agentToolsProvider).map((t) => t.name),
+        isNot(contains('import_files')));
+  });
+
+  test('a link in the workspace cannot lead outside', () async {
+    final outside = await Directory.systemTemp.createTemp('influencor_out_');
+    addTearDown(() => outside.delete(recursive: true));
+    File(p.join(outside.path, 'secret.md')).writeAsStringSync('secret');
+    try {
+      Link(p.join(root.path, 'lien')).createSync(outside.path);
+    } on FileSystemException {
+      markTestSkipped('symbolic links not allowed on this machine');
+      return;
+    }
+    final client = _ScriptedClient([
+      (_) => _calls([
+            ('read_note', {'path': 'lien/secret.md'}),
+            (
+              'create_note',
+              {'folder': 'lien', 'title': 'nouveau', 'content': 'x'}
+            ),
+          ]),
+      (_) => _text('non'),
+    ]);
+    final c = await container(client);
+    await c.read(assistantChatProvider.notifier).send('lis');
+
+    final results = client.requests[1].last.toolResults;
+    expect(results.map((r) => r.isError), [true, true]);
+    expect(File(p.join(outside.path, 'nouveau.md')).existsSync(), isFalse);
+  });
+
+  test('files outside the workspace are never attached', () async {
+    final outside = await Directory.systemTemp.createTemp('influencor_pick_');
+    addTearDown(() => outside.delete(recursive: true));
+    final photo = File(p.join(outside.path, 'photo.jpg'))
+      ..writeAsBytesSync(jpegWithMetadata());
+    final client = _ScriptedClient([
+      (h) {
+        expect(h.first.text, isNot(contains(photo.path)));
+        expect(h.first.text, isNot(contains('[Fichiers joints')));
+        return _text('ok');
+      },
+    ]);
+    final c = await container(client);
+    final chat = c.read(assistantChatProvider.notifier);
+    // Only an outside file and no text: nothing is sent at all.
+    await chat.send('', attachments: [photo.path]);
+    expect(client.requests, isEmpty);
+    await chat.send('regarde', attachments: [photo.path]);
+    expect(client.requests, hasLength(1));
+    expect(c.read(assistantChatProvider).items.first.attachments, isEmpty);
   });
 
   test('ask_user shows choices and waits for the tapped answer', () async {
@@ -682,9 +817,8 @@ void main() {
   });
 
   test('attached photo is cleaned by Deganeo into a library folder', () async {
-    final outside = await Directory.systemTemp.createTemp('influencor_pick_');
-    addTearDown(() => outside.delete(recursive: true));
-    final photo = File(p.join(outside.path, 'photo.jpg'))
+    final photo = File(p.join(root.path, 'Photos', 'photo.jpg'))
+      ..createSync(recursive: true)
       ..writeAsBytesSync(jpegWithMetadata());
     final original = photo.readAsBytesSync();
     final tempOut = await Directory.systemTemp.createTemp('influencor_clean_');
@@ -692,14 +826,15 @@ void main() {
 
     final client = _ScriptedClient([
       (h) {
-        // The model sees the attachment with its absolute path.
+        // The model sees the attachment with its workspace path.
         expect(h.first.text, contains("[Fichiers joints par l'utilisateur]"));
-        expect(h.first.text, contains(photo.path));
+        expect(h.first.text, contains('- Photos/photo.jpg'));
+        expect(h.first.text, isNot(contains(root.path)));
         return _calls([
           (
             'deganeo_clean',
             {
-              'paths': [photo.path],
+              'paths': ['Photos/photo.jpg'],
               'save': 'library',
               'folder': 'Publié',
             }
@@ -713,7 +848,7 @@ void main() {
       workspaceRootProvider.overrideWithValue(root.path),
       assistantConfigStoreProvider.overrideWithValue(_FakeConfigStore()),
       chatStoreProvider
-          .overrideWithValue(ChatStore(file: () async => chatFile)),
+          .overrideWithValue(ChatStore(directory: () async => chatDir)),
       llmClientFactoryProvider.overrideWithValue((_) => client),
       metadataCleanerProvider.overrideWithValue(_TestCleaner(tempOut)),
     ]);
@@ -870,7 +1005,7 @@ void main() {
       workspaceRootProvider.overrideWithValue(root.path),
       assistantConfigStoreProvider.overrideWithValue(_FakeConfigStore()),
       chatStoreProvider
-          .overrideWithValue(ChatStore(file: () async => chatFile)),
+          .overrideWithValue(ChatStore(directory: () async => chatDir)),
       llmClientFactoryProvider.overrideWithValue((_) => client),
     ]);
     addTearDown(c.dispose);

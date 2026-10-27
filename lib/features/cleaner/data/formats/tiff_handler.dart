@@ -199,7 +199,109 @@ class TiffHandler extends ByteFormatHandler {
       ifd = next;
       firstIfd = false;
     }
+
+    var stray = 0;
+    try {
+      stray = _zeroUnreferenced(copy, little, valueBytes);
+    } on FormatException {
+      // Unusual offset tables: the referenced data alone is cleaned.
+    }
+    if (stray > 0) {
+      findings.add(MetadataFinding(
+          MetadataCategory.trailingData, 'unreferenced data',
+          bytes: stray));
+    }
     out?.add(copy);
     return HandlerResult(findings);
+  }
+
+  /// Zeroes every byte of [d] that no IFD of the (already cleaned) file points
+  /// to: IFDs and values of an earlier revision, maker-note data stored
+  /// outside the Exif IFD, leftovers. Returns how many non-zero bytes were
+  /// cleared. Old-style JPEG tables (tags 519–521) have extents we cannot
+  /// know, so such files are left as they are.
+  static int _zeroUnreferenced(
+      Uint8List d, bool little, int Function(int, int) valueBytes) {
+    int r16(int o) {
+      if (o < 0 || o + 2 > d.length) throw const FormatException('TIFF offset');
+      return little ? d[o] | (d[o + 1] << 8) : (d[o] << 8) | d[o + 1];
+    }
+
+    int r32(int o) {
+      if (o < 0 || o + 4 > d.length) throw const FormatException('TIFF offset');
+      return little
+          ? d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24)
+          : (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3];
+    }
+
+    // SHORT / LONG array of an entry (strip offsets, byte counts…).
+    List<int> values(int e) {
+      final type = r16(e + 2);
+      final count = r32(e + 4);
+      if (type != 3 && type != 4) throw const FormatException('TIFF offsets');
+      final size = valueBytes(type, count);
+      final at = size > 4 ? r32(e + 8) : e + 8;
+      if (at + size > d.length) throw const FormatException('TIFF offsets');
+      return [
+        for (var k = 0; k < count; k++)
+          type == 3 ? r16(at + 2 * k) : r32(at + 4 * k),
+      ];
+    }
+
+    final used = <(int, int)>[(0, 8)];
+    void use(int start, int length) {
+      if (length <= 0 || start < 0 || start >= d.length) return;
+      used.add((start, start + length > d.length ? d.length : start + length));
+    }
+
+    final walked = <int>{};
+    var ifd = r32(4);
+    while (ifd != 0 && walked.add(ifd)) {
+      final n = r16(ifd);
+      use(ifd, 2 + n * 12 + 4);
+      final byTag = <int, int>{};
+      for (var k = 0; k < n; k++) {
+        final e = ifd + 2 + k * 12;
+        byTag[r16(e)] = e;
+        final size = valueBytes(r16(e + 2), r32(e + 4));
+        if (size > 4) use(r32(e + 8), size);
+      }
+      if (byTag.keys.any((t) => t >= 519 && t <= 521)) return 0;
+      for (final (offsets, lengths) in const [
+        (273, 279),
+        (324, 325),
+        (513, 514)
+      ]) {
+        final o = byTag[offsets];
+        if (o == null) continue;
+        final l = byTag[lengths];
+        if (l == null) return 0; // extent unknown: touch nothing
+        final starts = values(o);
+        final sizes = values(l);
+        for (var k = 0; k < starts.length && k < sizes.length; k++) {
+          use(starts[k], sizes[k]);
+        }
+      }
+      ifd = r32(ifd + 2 + n * 12);
+    }
+
+    used.sort((x, y) => x.$1.compareTo(y.$1));
+    var stray = 0;
+    void clear(int from, int to) {
+      for (var k = from; k < to; k++) {
+        if (d[k] != 0) {
+          stray++;
+          d[k] = 0;
+        }
+      }
+    }
+
+    var pos = 0;
+    for (final (start, end) in used) {
+      if (start > pos) clear(pos, start);
+      if (end > pos) pos = end;
+    }
+    clear(pos, d.length);
+    return stray;
   }
 }

@@ -12,7 +12,7 @@ import 'pick_mode.dart';
 
 /// Opens the in-app file browser as a full-screen route and returns the chosen
 /// absolute paths (empty if cancelled). For [PickMode.directory] the list holds
-/// the single chosen folder.
+/// the single chosen folder. With [root], browsing is confined to that folder.
 Future<List<String>> launchInAppBrowser(
   BuildContext context, {
   required PickMode mode,
@@ -20,6 +20,7 @@ Future<List<String>> launchInAppBrowser(
   String? title,
   String? initialDirectory,
   String? actionLabel,
+  String? root,
 }) async {
   if (mode == PickMode.mediaFiles) {
     final result = await Navigator.of(context).push<List<String>>(
@@ -30,6 +31,7 @@ Future<List<String>> launchInAppBrowser(
           title: title,
           initialDirectory: initialDirectory,
           actionLabel: actionLabel,
+          root: root,
         ),
       ),
     );
@@ -44,6 +46,7 @@ Future<List<String>> launchInAppBrowser(
         title: title,
         initialDirectory: initialDirectory,
         actionLabel: actionLabel,
+        root: root,
       ),
     ),
   );
@@ -77,6 +80,7 @@ class _FileBrowserScreen extends ConsumerStatefulWidget {
     this.initialDirectory,
     this.actionLabel,
     this.showImportMoveActions = false,
+    this.root,
   });
 
   final PickMode mode;
@@ -85,6 +89,9 @@ class _FileBrowserScreen extends ConsumerStatefulWidget {
   final String? initialDirectory;
   final String? actionLabel;
   final bool showImportMoveActions;
+
+  /// When set, nothing outside this folder can be browsed or chosen.
+  final String? root;
 
   @override
   ConsumerState<_FileBrowserScreen> createState() => _FileBrowserScreenState();
@@ -127,12 +134,16 @@ class _MediaGalleryScreen extends ConsumerStatefulWidget {
     this.title,
     this.initialDirectory,
     this.actionLabel,
+    this.root,
   });
 
   final bool allowMultiple;
   final String? title;
   final String? initialDirectory;
   final String? actionLabel;
+
+  /// When set, only the media of this folder (and its sub-folders) is shown.
+  final String? root;
 
   @override
   ConsumerState<_MediaGalleryScreen> createState() =>
@@ -174,6 +185,12 @@ class _MediaGalleryScreenState extends ConsumerState<_MediaGalleryScreen> {
       if (!dir.existsSync()) return;
       final normalized = p.normalize(dir.path);
       if (seen.add(normalized)) dirs.add(Directory(normalized));
+    }
+
+    final root = widget.root;
+    if (root != null) {
+      add(root);
+      return dirs;
     }
 
     final initial = widget.initialDirectory;
@@ -656,7 +673,10 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
     final start = widget.initialDirectory;
     _load(
       Directory(
-        start != null && start.isNotEmpty && Directory(start).existsSync()
+        start != null &&
+                start.isNotEmpty &&
+                _allowed(start) &&
+                Directory(start).existsSync()
             ? start
             : _initialDir(),
       ),
@@ -664,11 +684,26 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
     );
   }
 
+  /// Inside [_FileBrowserScreen.root] (or anywhere when there is none).
+  bool _allowed(String path) {
+    final root = widget.root;
+    return root == null || p.equals(root, path) || p.isWithin(root, path);
+  }
+
+  /// At the top of what may be browsed: the root, or a drive / `/`.
+  bool _atTop(Directory dir) {
+    final root = widget.root;
+    if (root != null) return p.equals(root, dir.path);
+    return p.equals(dir.parent.path, dir.path);
+  }
+
   // --- Locations -------------------------------------------------------------
 
   String _env(String key) => Platform.environment[key] ?? '';
 
   String _initialDir() {
+    final root = widget.root;
+    if (root != null) return root;
     if (Platform.isWindows) {
       final home = _env('USERPROFILE');
       if (home.isNotEmpty && Directory(home).existsSync()) return home;
@@ -697,6 +732,12 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
       if (path.isNotEmpty && Directory(path).existsSync()) {
         out.add(_Shortcut(label, icon, path));
       }
+    }
+
+    final root = widget.root;
+    if (root != null) {
+      add(strings.workspaceFolder, Icons.folder_special_outlined, root);
+      return out;
     }
 
     if (Platform.isWindows) {
@@ -738,6 +779,7 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
   // --- Loading ---------------------------------------------------------------
 
   Future<void> _load(Directory dir, {bool remember = true}) async {
+    if (!_allowed(dir.path)) return;
     final previous = _current;
     if (remember && previous != null && !p.equals(previous.path, dir.path)) {
       _history.add(previous);
@@ -790,10 +832,8 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
 
   void _goUp() {
     final cur = _current;
-    if (cur == null) return;
-    final parent = cur.parent;
-    if (p.equals(parent.path, cur.path)) return; // already at a root
-    _load(parent);
+    if (cur == null || _atTop(cur)) return;
+    _load(cur.parent);
   }
 
   bool get _canGoBackInBrowser => _history.isNotEmpty;
@@ -972,8 +1012,7 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
             ),
             _PathBar(
               path: _current?.path ?? '',
-              canGoUp: _current != null &&
-                  !p.equals(_current!.parent.path, _current!.path),
+              canGoUp: _current != null && !_atTop(_current!),
               onUp: _goUp,
               upTooltip: strings.parentFolder,
             ),

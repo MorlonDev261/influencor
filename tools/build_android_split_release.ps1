@@ -9,9 +9,13 @@ if (Test-Path $jbr) {
   $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 }
 
+# Degany's model (.env, see .env.example), when the file exists.
+$defines = @()
+if (Test-Path (Join-Path $repo '.env')) { $defines = @('--dart-define-from-file=.env') }
+
 Push-Location $repo
 try {
-  flutter build apk --release --split-per-abi
+  flutter build apk --release --split-per-abi @defines
   powershell -NoProfile -ExecutionPolicy Bypass -File $collector
 } finally {
   Pop-Location

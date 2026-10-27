@@ -6,6 +6,7 @@ import '../../domain/clean_options.dart';
 import '../../domain/clean_report.dart';
 import '../binary.dart';
 import '../format_handler.dart';
+import '../unsupported_content.dart';
 import 'iso/heif_meta.dart';
 import 'iso/iso_node.dart';
 import 'iso/meta_reader.dart';
@@ -30,6 +31,15 @@ class _Ctx {
   final offsetBoxes = <IsoNode>[]; // stco / co64
   final zero = <ByteRange>[]; // payload of dropped tracks
   final video = <VideoTarget>[];
+
+  /// `track_ID` of the dropped timed-metadata tracks.
+  final droppedTracks = <int>{};
+
+  /// File positions of the absolute `base_data_offset` of fragment headers.
+  final baseOffsets = <int>[];
+
+  /// A fragment (`moof`) still carries samples of a dropped track.
+  var fragmentOfDroppedTrack = false;
 }
 
 class _Plan {
@@ -104,6 +114,13 @@ class IsoBmffHandler extends FormatHandler {
     final outRaf = await output.open(mode: FileMode.write);
     try {
       final plan = await _plan(inRaf, await inRaf.length());
+      if (plan.ctx.fragmentOfDroppedTrack) {
+        // Its samples sit in fragments we do not rewrite: refuse rather than
+        // hand back a file that still holds the GPS / sensor track.
+        throw const UnsupportedContent(
+            'Fragmented video with a timed metadata track (GPS…) is not '
+            'supported');
+      }
 
       // New layout: kept boxes in original order, rebuilt boxes at new size.
       final newStart = <_TopBox, int>{};
@@ -123,6 +140,13 @@ class IsoBmffHandler extends FormatHandler {
       }
 
       _remapOffsets(plan, mapOffset);
+      final baseOffsets = <int, int>{};
+      for (final field in plan.ctx.baseOffsets) {
+        await inRaf.setPosition(field);
+        final old = await inRaf.read(8);
+        if (old.length != 8) throw const FormatException('Truncated tfhd');
+        baseOffsets[mapOffset(field)] = mapOffset(u64be(old, 0));
+      }
 
       for (final box in plan.kept) {
         final node = plan.rebuilt[box];
@@ -131,6 +155,14 @@ class IsoBmffHandler extends FormatHandler {
         } else {
           await _copy(inRaf, outRaf, box.start, box.size);
         }
+      }
+
+      // Fragment headers pointing at absolute positions follow the new layout.
+      for (final e in baseOffsets.entries) {
+        final value = Uint8List(8);
+        putU64be(value, 0, e.value);
+        await outRaf.setPosition(e.key);
+        await outRaf.writeFrom(value);
       }
 
       // Blank the bytes of removed tracks / items in place (offsets unchanged).
@@ -253,7 +285,54 @@ class IsoBmffHandler extends FormatHandler {
       }
       rebuilt[moovBox] = moov;
     }
+    for (final box in kept.where((b) => b.type == 'moof')) {
+      _scanMoof(await _readPayload(raf, box), box.start + box.headerSize, ctx);
+    }
     return _Plan(kept, rebuilt, ctx, heifResult);
+  }
+
+  /// Fragment headers (`moof/traf/tfhd`): notes the absolute
+  /// `base_data_offset`s, which must follow when boxes move, and fragments of
+  /// a dropped track. [at] is the file position of `d[0]`.
+  void _scanMoof(Uint8List d, int at, _Ctx ctx) {
+    for (final (type, start, end) in _boxes(d, 0, d.length)) {
+      if (type != 'traf') continue;
+      for (final (t, s, e) in _boxes(d, start, end)) {
+        if (t != 'tfhd') continue;
+        if (e - s < 8) throw const FormatException('Corrupt tfhd');
+        if (ctx.droppedTracks.contains(u32be(d, s + 4))) {
+          ctx.fragmentOfDroppedTrack = true;
+        }
+        if (d[s + 3] & 1 != 0) {
+          if (e - s < 16) throw const FormatException('Corrupt tfhd');
+          ctx.baseOffsets.add(at + s + 8);
+        }
+      }
+    }
+  }
+
+  /// (type, payload start, payload end) of the boxes in `d[start, end)`.
+  static List<(String, int, int)> _boxes(Uint8List d, int start, int end) {
+    final boxes = <(String, int, int)>[];
+    var o = start;
+    while (o + 8 <= end) {
+      final size32 = u32be(d, o);
+      var header = 8;
+      var size = size32;
+      if (size32 == 1) {
+        if (o + 16 > end) throw const FormatException('Truncated box');
+        size = u64be(d, o + 8);
+        header = 16;
+      } else if (size32 == 0) {
+        size = end - o;
+      }
+      if (size < header || o + size > end) {
+        throw const FormatException('Corrupt fragment box');
+      }
+      boxes.add((fourcc(d, o + 4), o + header, o + size));
+      o += size;
+    }
+    return boxes;
   }
 
   Future<Uint8List> _readPayload(RandomAccessFile raf, _TopBox box) async {
@@ -345,6 +424,11 @@ class IsoBmffHandler extends FormatHandler {
           minf == null ? null : IsoNode.find(IsoNode.parse(minf.data!), 'stbl');
       if (stbl != null) {
         ctx.zero.addAll(SampleTable.merged(IsoNode.parse(stbl.data!)));
+      }
+      final tkhd = IsoNode.find(IsoNode.parse(node.data!), 'tkhd')?.data;
+      if (tkhd != null && tkhd.isNotEmpty) {
+        final at = tkhd[0] == 1 ? 20 : 12; // after version/flags and times
+        if (tkhd.length >= at + 4) ctx.droppedTracks.add(u32be(tkhd, at));
       }
       ctx.findings.add(MetadataFinding(
           MetadataCategory.timedTrack, 'timed metadata track ($handler)',

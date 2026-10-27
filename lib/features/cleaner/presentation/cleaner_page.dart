@@ -10,7 +10,8 @@ import 'package:path/path.dart' as p;
 import '../../../core/l10n/app_strings.dart';
 import '../../../core/picker/app_file_picker.dart';
 import '../../../core/picker/pick_mode.dart';
-import '../../../core/services/storage_permission_service.dart';
+import '../../../core/providers/workspace_providers.dart';
+import '../../library/application/library_providers.dart';
 import '../../library/domain/library_entry.dart';
 import '../../library/presentation/widgets/video_preview.dart';
 import '../application/metadata_cleaner_service.dart';
@@ -34,8 +35,10 @@ class _Job {
 }
 
 /// The "Deganeo" tool: add up to [CleanerPage.maxFiles] photos / videos /
-/// PDFs, inspect their metadata, strip it (one by one or all at once), verify
-/// each result with an independent re-scan, then save / replace / discard.
+/// PDFs of the workspace, inspect their metadata, strip it (one by one or all
+/// at once), verify each result with an independent re-scan, then save /
+/// replace / discard. Files from elsewhere on the device are refused: they
+/// must be imported into the library first.
 class CleanerPage extends ConsumerStatefulWidget {
   const CleanerPage({super.key});
 
@@ -69,22 +72,39 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
 
   Future<void> _pick() async {
     final strings = ref.read(appStringsProvider);
+    final root = ref.read(workspaceRootProvider);
+    if (root == null) {
+      _snack(strings.needWorkspace);
+      return;
+    }
     final paths = await AppFilePicker.pick(
       context,
       mode: PickMode.mediaFiles,
       title: strings.selectMediaTitle,
       allowMultiple: true,
+      root: root,
     );
-    if (paths.isNotEmpty) _addPaths(paths);
+    if (paths.isNotEmpty && mounted) _addPaths(paths);
   }
 
   void _addPaths(List<String> paths) {
     final strings = ref.read(appStringsProvider);
+    final root = ref.read(workspaceRootProvider);
+    if (root == null) {
+      _snack(strings.needWorkspace);
+      return;
+    }
     final known = _jobs.map((j) => j.source).toSet();
     final fresh = <String>[];
+    var outside = 0;
     for (final path in paths) {
-      if (_isMediaPath(path) && known.add(path)) fresh.add(path);
+      if (!isInWorkspace(root, path)) {
+        outside++;
+      } else if (_isMediaPath(path) && known.add(path)) {
+        fresh.add(path);
+      }
     }
+    if (outside > 0) _snack(strings.outsideWorkspace(outside));
     if (fresh.isEmpty) return;
     final room = (CleanerPage.maxFiles - _jobs.length).clamp(0, 1 << 30);
     final accepted = fresh.take(room).toList();
@@ -165,20 +185,14 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
     }
   }
 
-  /// The cleaned copy keeps the extension of its *real* format (a ".jpg" that
-  /// was a PNG is saved as ".png").
-  String _downloadName(_Job job) =>
-      '${p.basenameWithoutExtension(job.source)}_clean'
-      '${p.extension(job.cleanPath!)}';
-
   /// Writes the cleaned copy next to its original (same folder, `_clean`
-  /// suffix, never overwriting) and registers it in the gallery index so other
-  /// apps (Facebook, WhatsApp...) list it as a normal image / video.
-  Future<void> _saveCopy(_Job job) async {
-    final target = _freeName(p.dirname(job.source), _downloadName(job));
-    await File(job.cleanPath!).copy(target);
-    await StoragePermissionService().scanMedia([target]);
-  }
+  /// suffix and the extension of its *real* format, never overwriting),
+  /// registers it in the gallery index so other apps (Facebook, WhatsApp...)
+  /// list it, and refreshes the library.
+  Future<void> _saveCopy(_Job job) => ref
+      .read(libraryControllerProvider)
+      .storeCleaned(job.source, job.cleanPath!,
+          replace: false, parentDir: p.dirname(job.source));
 
   Future<void> _download(_Job job) async {
     if (job.cleanPath == null) return;
@@ -209,32 +223,16 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
     }
   }
 
-  /// `name.ext` → `name (2).ext` … so a batch never overwrites a file.
-  String _freeName(String dir, String name) {
-    var candidate = p.join(dir, name);
-    var n = 2;
-    while (File(candidate).existsSync()) {
-      candidate = p.join(
-        dir,
-        '${p.basenameWithoutExtension(name)} ($n)${p.extension(name)}',
-      );
-      n++;
-    }
-    return candidate;
-  }
-
   Future<void> _replace(_Job job) async {
     final clean = job.cleanPath;
     if (clean == null) return;
     final source = job.source;
     final strings = ref.read(appStringsProvider);
     try {
-      // Copy next to the original, then swap with one rename: a failure halfway
-      // (disk full, app killed) must never leave the user's original truncated.
-      final tmp = File('$source.influencor-tmp');
-      await File(clean).copy(tmp.path);
-      await tmp.rename(source);
-      await StoragePermissionService().scanMedia([source]);
+      // Copy next to the original, then swap with one rename (a failure
+      // halfway never leaves the original truncated, nor a stray copy).
+      await ref.read(libraryControllerProvider).storeCleaned(source, clean,
+          replace: true, parentDir: p.dirname(source));
       await _deleteTemp(clean);
       if (!mounted) return;
       _snack(strings.fileReplaced);

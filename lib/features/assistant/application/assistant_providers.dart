@@ -13,6 +13,7 @@ import '../../../core/providers/workspace_providers.dart';
 import '../../library/domain/library_entry.dart';
 import '../data/assistant_config_store.dart';
 import '../data/chat_store.dart';
+import '../data/degany_env.dart';
 import '../data/user_profile_store.dart';
 import '../data/llm_client.dart';
 import '../domain/chat_message.dart';
@@ -63,9 +64,16 @@ final assistantConfigControllerProvider =
     AsyncNotifierProvider<AssistantConfigController, AssistantConfig>(
         AssistantConfigController.new);
 
-final assistantConfigProvider = Provider<AssistantConfig>((ref) =>
-    ref.watch(assistantConfigControllerProvider).value ??
-    const AssistantConfig());
+/// The model set at build time in `.env`. Overridden in tests.
+final deganyEnvProvider = Provider<DeganyEnv>((ref) => DeganyEnv.fromBuild());
+
+/// The configuration Degany runs with: the user's settings, with the build's
+/// model applied (see [DeganyEnv.apply]). The settings screen edits the
+/// user's own ([assistantConfigControllerProvider]).
+final assistantConfigProvider = Provider<AssistantConfig>((ref) => ref
+    .watch(deganyEnvProvider)
+    .apply(ref.watch(assistantConfigControllerProvider).value ??
+        const AssistantConfig()));
 
 // --- What Degany knows about the user ------------------------------------------
 
@@ -135,8 +143,12 @@ final appPrivateDirectoriesProvider = FutureProvider<List<String>>((ref) async {
   }
 });
 
-/// Where the conversation is saved between launches. Overridden in tests.
+/// Where the conversations are saved between launches. Overridden in tests.
 final chatStoreProvider = Provider<ChatStore>((ref) => ChatStore());
+
+/// Degany's saved conversations, most recent first (the history screen).
+final chatHistoryProvider = FutureProvider.autoDispose<List<ChatSummary>>(
+    (ref) => ref.watch(chatStoreProvider).list());
 
 /// Builds the client for a configuration. Overridden in tests.
 final llmClientFactoryProvider =
@@ -342,6 +354,12 @@ class AssistantChatController extends Notifier<AssistantChatState> {
   Completer<String?>? _pendingAnswer;
   int? _questionAt;
 
+  /// The conversation shown (null until its first message is saved).
+  String? _chatId;
+  DateTime? _createdAt;
+
+  String? get currentChatId => _chatId;
+
   @override
   AssistantChatState build() {
     _restoring = Future.microtask(_restore);
@@ -356,11 +374,19 @@ class AssistantChatController extends Notifier<AssistantChatState> {
 
   AppStrings get _strings => ref.read(appStringsProvider);
 
-  /// Brings back the conversation saved at the end of the last session.
+  /// Brings back the conversation open at the end of the last session.
   Future<void> _restore() async {
-    final data = await ref.read(chatStoreProvider).load();
+    final store = ref.read(chatStoreProvider);
+    final id = await store.currentId();
+    final data = id == null ? null : await store.load(id);
     // Something already happened in this session: keep it.
     if (data == null || state.items.isNotEmpty || state.busy) return;
+    _show(id!, data);
+  }
+
+  /// Puts the saved conversation [id] ([data]) in the chat and the history
+  /// sent to the model.
+  void _show(String id, Map<String, dynamic> data) {
     final items = [
       if (data['items'] case final List<dynamic> list)
         for (final raw in list)
@@ -375,6 +401,8 @@ class AssistantChatController extends Notifier<AssistantChatState> {
       ..clear()
       ..addAll(history);
     _repairHistory();
+    _chatId = id;
+    _createdAt = DateTime.tryParse('${data['createdAt']}');
     state = AssistantChatState(items: items);
   }
 
@@ -386,21 +414,47 @@ class AssistantChatController extends Notifier<AssistantChatState> {
   @visibleForTesting
   Future<void> get pendingSave => _saving;
 
+  /// Saves the conversation shown (an empty chat saves nothing: it only
+  /// stops being the open one) and refreshes the history list.
   Future<void> _persist() {
     final store = ref.read(chatStoreProvider);
     // Snapshot now: the chat may change before the queued write runs.
     final items = state.items.length > _savedItems
         ? state.items.sublist(state.items.length - _savedItems)
         : state.items;
-    final data = items.isEmpty
-        ? null
-        : {
-            'version': 1,
-            'items': [for (final i in items) i.toJson()],
-            'history': [for (final m in _history) m.toJson()],
-          };
-    return _saving =
-        _saving.then((_) => data == null ? store.clear() : store.save(data));
+    String? id;
+    Map<String, dynamic>? data;
+    if (items.isNotEmpty) {
+      final now = DateTime.now();
+      id = _chatId ??= 'c${now.microsecondsSinceEpoch}';
+      _createdAt ??= now;
+      data = {
+        'version': 2,
+        'title': _title(state.items),
+        'createdAt': _createdAt!.toIso8601String(),
+        'updatedAt': now.toIso8601String(),
+        'items': [for (final i in items) i.toJson()],
+        'history': [for (final m in _history) m.toJson()],
+      };
+    }
+    return _saving = _saving.then((_) async {
+      if (id != null) await store.save(id, data!);
+      await store.setCurrent(id);
+      if (ref.mounted) ref.invalidate(chatHistoryProvider);
+    });
+  }
+
+  /// The first thing the user said (or the first file they attached).
+  static String _title(List<ChatItem> items) {
+    for (final i in items) {
+      if (i.kind != ChatItemKind.user) continue;
+      final text = i.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      final title =
+          text.isNotEmpty ? text : i.attachments.map(p.basename).join(', ');
+      if (title.isEmpty) continue;
+      return title.length > 80 ? '${title.substring(0, 80)}…' : title;
+    }
+    return '';
   }
 
   /// Keeps what is sent to the model under [_contextBudget]: first shortens
@@ -504,14 +558,50 @@ class AssistantChatController extends Notifier<AssistantChatState> {
     if (pending != null && !pending.isCompleted) pending.complete(null);
   }
 
-  /// Starts a new conversation.
+  /// Starts a new conversation; the one shown stays in the history.
   void clear() {
-    stop();
-    _dropQuestion();
-    _runId++;
+    _leave();
     _history.clear();
     state = const AssistantChatState();
     unawaited(_persist());
+  }
+
+  /// Stops whatever runs in the conversation shown, before another replaces
+  /// it.
+  void _leave() {
+    stop();
+    _dropQuestion();
+    _runId++;
+    _chatId = null;
+    _createdAt = null;
+  }
+
+  /// Reopens the saved conversation [id], where it was left. Returns false
+  /// when it can no longer be read.
+  Future<bool> open(String id) async {
+    if (id == _chatId) return true;
+    await _saving;
+    final data = await ref.read(chatStoreProvider).load(id);
+    if (data == null) return false;
+    _leave();
+    _show(id, data);
+    await (_saving = _saving.then((_) async {
+      await ref.read(chatStoreProvider).setCurrent(id);
+    }));
+    return true;
+  }
+
+  /// Deletes the saved conversation [id] (a new one starts if it is shown).
+  Future<void> delete(String id) async {
+    if (id == _chatId) {
+      _leave();
+      _history.clear();
+      state = const AssistantChatState();
+    }
+    await (_saving = _saving.then((_) async {
+      await ref.read(chatStoreProvider).delete(id);
+      if (ref.mounted) ref.invalidate(chatHistoryProvider);
+    }));
   }
 
   void stop() {
@@ -521,20 +611,27 @@ class AssistantChatController extends Notifier<AssistantChatState> {
     _client?.cancel();
   }
 
-  /// Sends a message, with optional attached files (absolute paths). While
-  /// the agent waits for an answer to its question, the text is that answer.
+  /// Sends a message, with optional attached files (absolute paths). Only
+  /// files of the current workspace are attached: Degany works nowhere else.
+  /// While the agent waits for an answer to its question, the text is that
+  /// answer.
   Future<void> send(String text, {List<String> attachments = const []}) async {
     final message = text.trim();
     if (state.awaitingAnswer) {
       if (message.isNotEmpty) answer(message);
       return;
     }
-    if ((message.isEmpty && attachments.isEmpty) || state.busy) return;
+    final root = ref.read(workspaceRootProvider);
+    final files = [
+      for (final path in attachments)
+        if (isInWorkspace(root, path)) path,
+    ];
+    if ((message.isEmpty && files.isEmpty) || state.busy) return;
     final config = ref.read(assistantConfigProvider);
     _add(ChatItem(
       kind: ChatItemKind.user,
       text: message,
-      attachments: attachments,
+      attachments: files,
     ));
     if (!config.isReady) {
       _add(ChatItem(
@@ -568,8 +665,7 @@ class AssistantChatController extends Notifier<AssistantChatState> {
       navigator: (route, {required push}) => navigator?.call(route, push: push),
       ask: _ask,
     );
-    _history
-        .add(ChatMessage.user(await _withAttachments(message, attachments)));
+    _history.add(ChatMessage.user(_withAttachments(message, files, root)));
     if (_fitContext()) {
       _add(ChatItem(
           kind: ChatItemKind.notice, text: _strings.deganyContextTrimmed));
@@ -733,25 +829,18 @@ class AssistantChatController extends Notifier<AssistantChatState> {
     }
   }
 
-  /// What the model reads for a message with attached files: the files'
-  /// absolute paths, kind and size, so tools can use them directly.
-  Future<String> _withAttachments(String text, List<String> paths) async {
-    if (paths.isEmpty) return text;
-    String? cache;
-    try {
-      cache = (await getTemporaryDirectory()).path;
-    } catch (_) {}
+  /// What the model reads for a message with attached files: their paths in
+  /// the workspace, kind and size, so tools can use them directly.
+  String _withAttachments(String text, List<String> paths, String? root) {
+    if (paths.isEmpty || root == null) return text;
     final lines = <String>[];
     for (final path in paths) {
       var size = '';
       try {
         size = ', ${(File(path).lengthSync() / 1024).ceil()} Ko';
       } catch (_) {}
-      final temp = cache != null && p.isWithin(cache, path)
-          ? ' — copie temporaire faite par le sélecteur : « copy » et '
-              '« replace » sont impossibles, proposer la bibliothèque'
-          : '';
-      lines.add('- $path (${kindForFile(path).name}$size)$temp');
+      final rel = p.relative(path, from: root).replaceAll('\\', '/');
+      lines.add('- $rel (${kindForFile(path).name}$size)');
     }
     return '${text.isEmpty ? "(Fichiers joints, sans message.)" : text}\n\n'
         '[Fichiers joints par l\'utilisateur]\n${lines.join('\n')}';
@@ -858,11 +947,11 @@ Your name is Degany. If asked who you are, say you are Degany, Influencor's AI; 
 
 How to work:
 - Use tools to find facts instead of guessing; search before saying something doesn't exist. Chain as many tool calls as the task needs, then give a short final answer.
-- Paths are relative to the workspace root (e.g. "Clients/Ana/brief.md"); "" is the root. Absolute device paths are only for importing files or for Deganeo on files outside the library.
+- You work only inside the current workspace folder: every path is relative to its root (e.g. "Clients/Ana/brief.md"); "" is the root. Files elsewhere on the device are out of reach (tools refuse them): if the user needs one, ask them to import it into the library first (Library → Import).
 - Whenever you mention a file or folder of the library, write its path as a link: [[relative/path.ext]] (the app turns it into a button that opens the item). Never invent paths.
 - Destructive actions (trash, permanent deletion, replacing an original) ask the user for confirmation automatically; if refused, don't retry.
 - When a decision belongs to the user (where to save, which folder, which option), ask with ask_user and short choices instead of guessing.
-- Attached files arrive in the user's message under "[Fichiers joints par l'utilisateur]" with their absolute paths. With media and no clear instruction, offer Deganeo: inspect them, show what was found, then ask with ask_user where to save the cleaned files — "Copie à côté de l'original" (save=copy), "Remplacer l'original" (save=replace) or "Ranger dans la bibliothèque" (save=library, then ask or suggest the folder). For files marked as temporary copies, only offer the library.
+- Attached files (always files of the workspace) arrive in the user's message under "[Fichiers joints par l'utilisateur]" with their paths. With media and no clear instruction, offer Deganeo: inspect them, show what was found, then ask with ask_user where to save the cleaned files — "Copie à côté de l'original" (save=copy), "Remplacer l'original" (save=replace) or "Ranger dans un autre dossier" (save=library, then ask or suggest the folder).
 - Amounts are in Ariary (Ar) unless the user says otherwise.
 - Reply in the user's language (default: $language). Be concise and friendly; use short lists when helpful. You can write captions, posts and texts for the user and save them as notes when asked.
 

@@ -76,9 +76,10 @@ class AgentToolContext {
   LibraryController get library => ref.read(libraryControllerProvider);
 
   /// Resolves a path given by the model: relative to the workspace root, or
-  /// absolute. Unless [anywhere], it must stay inside the workspace and out of
-  /// the hidden `.clipboard` metadata folder.
-  String resolve(String? input, {bool anywhere = false}) {
+  /// absolute. Either way it must stay inside the current workspace (also
+  /// once symbolic links are followed) and out of the hidden `.clipboard`
+  /// metadata folder: Degany never reaches anything else on the device.
+  String resolve(String? input) {
     final raw = (input ?? '').trim().replaceAll('\\', '/');
     String abs;
     if (raw.isEmpty || raw == '/' || raw == '.' || raw == './') {
@@ -89,10 +90,6 @@ class AgentToolContext {
       // Relative: needs a workspace ([root] throws the friendly error).
       abs = p.normalize(
           p.join(root, raw.startsWith('/') ? raw.substring(1) : raw));
-    }
-    if (anywhere) {
-      _guardPrivate(abs, input);
-      return abs;
     }
     final r = root;
     // "/Clients/Ana" usually means "Clients/Ana" in the workspace.
@@ -106,8 +103,31 @@ class AgentToolContext {
     if (parts.any((s) => s == '..' || s == '.clipboard')) {
       throw ToolError('Chemin non autorisé : $input');
     }
+    _guardLinks(abs, input);
     _guardPrivate(abs, input);
     return abs;
+  }
+
+  /// A symbolic link inside the workspace must not lead out of it (or into
+  /// `.clipboard`): the real target is checked against the real workspace.
+  void _guardLinks(String abs, String? input) {
+    // A file about to be created: its nearest existing folder decides.
+    var existing = abs;
+    final tail = <String>[];
+    while (FileSystemEntity.typeSync(existing, followLinks: false) ==
+            FileSystemEntityType.notFound &&
+        !p.equals(p.dirname(existing), existing)) {
+      tail.insert(0, p.basename(existing));
+      existing = p.dirname(existing);
+    }
+    final real = p.joinAll([_realPath(existing), ...tail]);
+    if (p.equals(real, abs)) return;
+    final realRoot = _realPath(root);
+    final inside = p.equals(real, realRoot) || p.isWithin(realRoot, real);
+    if (!inside ||
+        p.split(p.relative(real, from: realRoot)).contains('.clipboard')) {
+      throw ToolError('Chemin hors du dossier de travail : $input');
+    }
   }
 
   /// Refuses [abs] when it is in one of [protectedDirs] (also through a

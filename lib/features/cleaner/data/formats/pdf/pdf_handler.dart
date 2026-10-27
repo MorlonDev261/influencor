@@ -46,7 +46,21 @@ class _Edit {
 class PdfHandler extends ByteFormatHandler {
   const PdfHandler();
 
-  static const _dropKeys = {'Metadata', 'PieceInfo', 'Thumb', 'LastModified'};
+  /// Dropped from every dictionary. `CreationDate` / `ModDate` are optional
+  /// wherever they appear (annotations, embedded files' `/Params`…).
+  static const _dropKeys = {
+    'Metadata', 'PieceInfo', 'Thumb', 'LastModified', 'CreationDate',
+    'ModDate', //
+  };
+
+  /// Annotation subtypes (PDF 2.0, 12.5.6.1).
+  static const _annotSubtypes = {
+    'Text', 'Link', 'FreeText', 'Line', 'Square', 'Circle', 'Polygon',
+    'PolyLine', 'Highlight', 'Underline', 'Squiggly', 'StrikeOut', 'Caret',
+    'Stamp', 'Ink', 'Popup', 'FileAttachment', 'Sound', 'Movie', 'Screen',
+    'Widget', 'PrinterMark', 'TrapNet', 'Watermark', '3D', 'Redact',
+    'Projection', 'RichMedia', //
+  };
   static const _infoKeys = <String, MetadataCategory>{
     'Title': MetadataCategory.comment,
     'Author': MetadataCategory.comment,
@@ -442,12 +456,17 @@ class PdfHandler extends ByteFormatHandler {
       }
     } else if (v is PDict) {
       final type = v['Type'];
-      final isAnnot = type is PName && type.name == 'Annot';
       final subtype = v['Subtype'];
+      // `/Type /Annot` is optional: most writers leave it out, so an
+      // annotation is also recognised by its subtype and its `/Rect`.
+      final isAnnot = (type is PName && type.name == 'Annot') ||
+          (subtype is PName &&
+              _annotSubtypes.contains(subtype.name) &&
+              v['Rect'] != null);
       final isWidget = subtype is PName && subtype.name == 'Widget';
       for (final e in v.entries) {
         var drop = _dropKeys.contains(e.key);
-        if (isAnnot && (e.key == 'M' || e.key == 'CreationDate')) drop = true;
+        if (isAnnot && e.key == 'M') drop = true;
         if (isAnnot && e.key == 'T' && !isWidget) drop = true;
         if (!drop) {
           _walk(e.value, owner, scan, edits, findings, visit, xmpNums);
@@ -469,7 +488,7 @@ class PdfHandler extends ByteFormatHandler {
                 MetadataCategory.comment, 'annotation author', entries: [
               MetadataEntry('Annotation author', _pdfText(owner.src, val))
             ]));
-          case 'M' || 'CreationDate' || 'LastModified':
+          case 'M' || 'CreationDate' || 'ModDate' || 'LastModified':
             findings.add(
                 MetadataFinding(MetadataCategory.dateTime, e.key, entries: [
               MetadataEntry(e.key == 'M' ? 'Annotation date' : e.key,

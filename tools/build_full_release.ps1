@@ -17,9 +17,13 @@ if (Test-Path $jbr) {
   $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 }
 
+# Degany's model (.env, see .env.example), when the file exists.
+$defines = @()
+if (Test-Path (Join-Path $repo '.env')) { $defines = @('--dart-define-from-file=.env') }
+
 Push-Location $repo
 try {
-  flutter build windows --release
+  flutter build windows --release @defines
   if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
 
   $releaseDir = Join-Path $repo 'build/windows/x64/runner/Release'
@@ -56,11 +60,11 @@ try {
   }
 
   # Android: one APK per ABI, a universal APK, and the Play Store bundle.
-  flutter build apk --release --split-per-abi
+  flutter build apk --release --split-per-abi @defines
   if ($LASTEXITCODE -ne 0) { throw "APK (split) build failed" }
-  flutter build apk --release
+  flutter build apk --release @defines
   if ($LASTEXITCODE -ne 0) { throw "APK (universal) build failed" }
-  flutter build appbundle --release
+  flutter build appbundle --release @defines
   if ($LASTEXITCODE -ne 0) { throw "AAB build failed" }
 
   if (-not $SkipWeb) {
