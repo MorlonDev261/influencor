@@ -185,6 +185,26 @@ Les builds web ne reçoivent pas le `.env` : la clé serait lisible par tout
 visiteur. Dans un APK / EXE elle reste extractible : clé dédiée, avec plafond
 de dépenses.
 
+### Relais DeepSeek du site
+
+Pour ne pas embarquer la clé DeepSeek, le nginx d'`influencor-web` relaie
+`https://influencor.mi-kandra.org/api/degany/v1/chat/completions` vers DeepSeek
+(`nginx/snippets/degany-proxy.conf`). L'app ne connaît qu'un jeton :
+
+| `.env` de l'app | Valeur |
+| --- | --- |
+| `DEGANY_PROVIDER` | `deepseek` |
+| `DEGANY_BASE_URL` | `https://influencor.mi-kandra.org/api/degany/v1` |
+| `DEGANY_API_KEY` | `INFLUENCOR_DEGANY_APP_TOKEN` du `.env` d'`influencor-web` |
+
+nginx refuse un mauvais jeton (401), remplace le jeton par
+`INFLUENCOR_DEGANY_DEEPSEEK_KEY`, ne transmet aucun en-tête du client et plafonne
+le débit (30 requêtes/min par IP, rafale de 20, 4 connexions simultanées ; 600/min
+au total). Seule cette URL est relayée : la liste des modèles (`/models`) ne
+l'est pas. Le jeton reste extractible de l'app, mais il se change sans toucher à
+DeepSeek ; nginx ne lit pas le corps, il n'impose donc ni le modèle ni un
+plafond de tokens : gardez un plafond de dépenses chez DeepSeek.
+
 ## Conversation et contexte
 
 La conversation (affichage + historique envoyé au modèle) est sauvegardée à la
