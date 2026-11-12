@@ -789,6 +789,95 @@ void main() {
     expect(state.items.last.text, contains('Bibliothèque'));
   });
 
+  test('ask_user with multiple=true returns every ticked choice', () async {
+    final client = _ScriptedClient([
+      (_) => _calls([
+            (
+              'ask_user',
+              {
+                'question': 'Quels réseaux ?',
+                'options': ['Facebook', 'TikTok', 'Instagram'],
+                'multiple': true,
+              }
+            ),
+          ]),
+      (h) => _text(h.last.toolResults.single.content),
+    ]);
+    final c = await container(client);
+    final chat = c.read(assistantChatProvider.notifier);
+    final run = chat.send('publie');
+    await pumpEventQueue();
+    final question = c
+        .read(assistantChatProvider)
+        .items
+        .singleWhere((i) => i.kind == ChatItemKind.question);
+    expect(question.multiple, isTrue);
+
+    chat.answer(jsonEncode(['Facebook', 'Instagram']));
+    await run;
+    final result =
+        jsonDecode(client.requests.last.last.toolResults.single.content)
+            as Map<String, dynamic>;
+    expect(result['answers'], ['Facebook', 'Instagram']);
+    // Saved and restored with its flag.
+    final saved = ChatItem.fromJson(jsonDecode(jsonEncode(question.toJson())))!;
+    expect(saved.multiple, isTrue);
+  });
+
+  test('ask_form shows the fields and returns the values', () async {
+    final client = _ScriptedClient([
+      (_) => _calls([
+            (
+              'ask_form',
+              {
+                'title': 'Nouvelle commande',
+                'fields': [
+                  {'name': 'client', 'label': 'Client', 'required': true},
+                  {'name': 'amount', 'label': 'Montant', 'type': 'number'},
+                  {'name': 'date', 'label': 'Livraison', 'type': 'date'},
+                  {
+                    'name': 'account',
+                    'label': 'Compte',
+                    'type': 'choice',
+                    'options': ['MVola', 'Cash'],
+                  },
+                  {'name': 'bad', 'label': 'Type inconnu', 'type': 'weird'},
+                  {'name': 'client', 'label': 'Doublon'},
+                ],
+              }
+            ),
+          ]),
+      (h) => _text(h.last.toolResults.single.content),
+    ]);
+    final c = await container(client);
+    final chat = c.read(assistantChatProvider.notifier);
+    final run = chat.send('note une commande');
+    await pumpEventQueue();
+    final state = c.read(assistantChatProvider);
+    expect(state.awaitingAnswer, isTrue);
+    final form =
+        state.items.singleWhere((i) => i.kind == ChatItemKind.question);
+    expect(form.text, 'Nouvelle commande');
+    expect([for (final f in form.fields) f['name']],
+        ['client', 'amount', 'date', 'account', 'bad']);
+    expect(form.fields.last['type'], 'text');
+    // The form is a card, not an action line.
+    expect(questionTools, contains('ask_form'));
+
+    chat.answer(jsonEncode({
+      'client': 'Ana',
+      'amount': 45000,
+      'date': '2026-11-20',
+      'account': 'MVola',
+    }));
+    await run;
+    final result =
+        jsonDecode(client.requests.last.last.toolResults.single.content)
+            as Map<String, dynamic>;
+    expect(result['values'], containsPair('client', 'Ana'));
+    expect(result['values'], containsPair('amount', 45000));
+  });
+
   test('typing while a question waits answers it', () async {
     final client = _ScriptedClient([
       (_) => _calls([

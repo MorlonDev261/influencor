@@ -5,20 +5,24 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/widgets/app_dialog.dart';
 import '../../../core/l10n/app_strings.dart';
-import '../../../core/providers/edit_mode_provider.dart';
 import '../../../core/providers/workspace_providers.dart';
 import '../../../core/widgets/empty_state.dart';
+import '../../../core/widgets/item_menu.dart';
 import '../application/task_providers.dart';
 import '../domain/task_doc.dart';
 
-String taskEditRoute(String id) =>
-    Uri(path: '/task/edit', queryParameters: {'id': id}).toString();
+/// The task's own page; [edit] opens it ready to change.
+String taskEditRoute(String id, {bool edit = false}) => Uri(
+      path: '/task/edit',
+      queryParameters: {'id': id, if (edit) 'edit': '1'},
+    ).toString();
 
 class TasksScreen extends ConsumerWidget {
   const TasksScreen({super.key});
 
-  Future<void> _open(BuildContext context, WidgetRef ref, String id) async {
-    await context.push(taskEditRoute(id));
+  Future<void> _open(BuildContext context, WidgetRef ref, String id,
+      {bool edit = false}) async {
+    await context.push(taskEditRoute(id, edit: edit));
     ref.invalidate(taskListProvider);
   }
 
@@ -27,7 +31,7 @@ class TasksScreen extends ConsumerWidget {
     if (store == null) return;
     final task = TaskDoc(id: const Uuid().v4());
     await store.save(task);
-    if (context.mounted) await _open(context, ref, task.id);
+    if (context.mounted) await _open(context, ref, task.id, edit: true);
   }
 
   Future<void> _delete(
@@ -50,7 +54,6 @@ class TasksScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final strings = ref.watch(appStringsProvider);
     final hasWorkspace = ref.watch(workspaceRootProvider) != null;
-    final editing = ref.watch(editModeProvider);
     final tasks = ref.watch(taskListProvider).value ?? const <TaskDoc>[];
     final theme = Theme.of(context);
 
@@ -58,9 +61,8 @@ class TasksScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: BackButton(onPressed: () => context.go('/menu')),
         title: Text(strings.tasks),
-        actions: [if (hasWorkspace) const EditModeButton()],
       ),
-      floatingActionButton: hasWorkspace && editing
+      floatingActionButton: hasWorkspace
           ? FloatingActionButton.extended(
               onPressed: () => _create(context, ref),
               icon: const Icon(Icons.add),
@@ -119,14 +121,11 @@ class TasksScreen extends ConsumerWidget {
                                   ],
                                 ),
                               ),
-                              if (editing)
-                                IconButton(
-                                  tooltip: strings.delete,
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () => _delete(context, ref, t),
-                                )
-                              else
-                                const SizedBox(height: 48, width: 12),
+                              ItemMenuButton(
+                                onEdit: () =>
+                                    _open(context, ref, t.id, edit: true),
+                                onDelete: () => _delete(context, ref, t),
+                              ),
                             ],
                           ),
                         ),

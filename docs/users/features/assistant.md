@@ -46,6 +46,46 @@ La réponse s'écrit mot à mot. Pendant le travail, vous voyez :
 Les fichiers cités apparaissent comme des boutons : appui = ouvrir, appui long =
 copier le chemin. Touchez une ligne d'outil pour voir ce qui a été fait.
 
+## Ce que Degany affiche
+
+En plus du texte mis en forme (titres, gras, italique, listes numérotées ou à
+cocher, citations, code coloré, formules), Degany peut montrer dans ses
+réponses :
+
+- **Tableaux** : défilement sur le côté sur téléphone. Le menu **⋯** sous le
+  tableau permet de le copier pour un tableur, de l'enregistrer en **tableau
+  Influencor** ou en **CSV**.
+- **Graphiques** : courbe, histogramme (vertical, horizontal, empilé), aire,
+  camembert, anneau, nuage de points, courbe miniature. Touchez un point ou
+  une barre pour voir la valeur. Le menu **⋯** l'enregistre en image, le
+  partage ou copie ses données.
+- **Chiffres clés** (avec hausse ▲ ou baisse ▼), **barres de progression** et
+  **jauges**, **encadrés** (info, réussite, attention, erreur, astuce),
+  **listes** d'éléments à ouvrir, **frises** d'étapes, **schémas**
+  (organigramme, étapes d'une décision), **lieux** à ouvrir dans une carte.
+- **Vos données, en direct** : une tâche (cochez ses cases directement dans
+  la conversation), un relevé de comptabilité avec son graphique, un
+  comparatif de frais mobile money (le moins cher en vert), une galerie de
+  vos photos, l'aperçu d'une note, d'un tableau ou d'un dossier, le rapport
+  de Deganeo (valeurs masquées jusqu'à ce que vous touchiez l'œil).
+- **Images** : vos photos (celles que vous joignez et celles que Degany
+  montre) s'affichent en grand, sans être coupées quand il y en a une
+  seule, côte à côte quand il y en a deux, en grille au-delà (« +N » s'il y
+  en a beaucoup). Un appui ouvre la visionneuse, où l'on fait défiler toutes
+  les images. Les formats que l'ordinateur ne sait pas afficher (HEIC sous
+  Windows) et les vidéos apparaissent comme une vignette avec leur type.
+- **Boutons d'action** sous une réponse (« Créer la tâche »…) et
+  **suggestions** de questions : un appui les envoie à Degany.
+- **Formulaires** : quand il lui faut plusieurs informations (client,
+  montant, date avec calendrier, choix…), Degany les demande en une fois.
+  Certaines questions acceptent plusieurs choix : cochez-les, puis
+  **Valider**.
+
+Sous chaque réponse terminée : **copier** (Markdown ou texte simple),
+**enregistrer en note**, **partager**. Ce que vous enregistrez depuis la
+conversation (notes, tableaux, CSV, images) va dans le dossier **Degany** de
+votre dossier de travail.
+
 ## Mémoire de Degany
 
 Degany retient au fil des conversations ce qu'il apprend sur vous : nom,

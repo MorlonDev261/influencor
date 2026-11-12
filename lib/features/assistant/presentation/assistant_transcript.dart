@@ -3,19 +3,24 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/l10n/app_strings.dart';
-import '../../../core/providers/workspace_providers.dart';
 import '../../library/domain/library_entry.dart';
 import '../application/assistant_providers.dart';
+import '../../../core/services/content_share_ui.dart';
+import '../../library/application/library_providers.dart';
 import '../application/tools/app_tools.dart';
+import 'rich/chat_image.dart';
+import 'rich/markdown_blocks.dart';
+import 'rich/rich_common.dart';
+import 'rich/rich_message.dart';
+
+export 'rich/rich_message.dart' show RichMessage, PathChip, CodeBlock;
 
 // The conversation, drawn like a coding-agent transcript: the assistant writes
 // full width (no bubble), its reasoning and its actions appear inline as they
@@ -120,12 +125,36 @@ class UserMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    bool picture(String f) => switch (kindForFile(f)) {
+          EntryKind.image || EntryKind.video => true,
+          _ => false,
+        };
+    final pictures = [
+      for (final f in attachments)
+        if (picture(f)) f
+    ];
+    final others = [
+      for (final f in attachments)
+        if (!picture(f)) f
+    ];
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 6, left: 48),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (attachments.isNotEmpty)
+          // Pictures and videos show as pictures, other files as tiles.
+          if (pictures.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(
+                  bottom: text.isEmpty && others.isEmpty ? 0 : 6),
+              child: ChatImageGallery(
+                sources: [for (final f in pictures) ChatImageSource.file(f)],
+                alignEnd: true,
+                maxWidth: 380,
+                maxHeight: 300,
+              ),
+            ),
+          if (others.isNotEmpty)
             Padding(
               padding: EdgeInsets.only(bottom: text.isEmpty ? 0 : 6),
               child: Wrap(
@@ -133,7 +162,7 @@ class UserMessage extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final path in attachments) AttachmentTile(path: path),
+                  for (final path in others) AttachmentTile(path: path),
                 ],
               ),
             ),
@@ -232,20 +261,137 @@ class AttachmentTile extends StatelessWidget {
       );
 }
 
-/// A question from the agent, with its choices as buttons. Once answered,
-/// the choice stays visible and the buttons are disabled.
-class QuestionCard extends StatelessWidget {
+/// A question from the agent, with its choices as buttons (or chips to tick
+/// and a confirm button when several can be picked). Once answered, the
+/// choice stays visible and the buttons are disabled.
+class QuestionCard extends ConsumerStatefulWidget {
   const QuestionCard({required this.item, required this.onAnswer, super.key});
 
   final ChatItem item;
   final ValueChanged<String> onAnswer;
 
   @override
+  ConsumerState<QuestionCard> createState() => _QuestionCardState();
+}
+
+class _QuestionCardState extends ConsumerState<QuestionCard> {
+  final _picked = <String>{};
+
+  /// The choices of an answered multiple-choice question.
+  static List<String>? _answers(String? answer) {
+    if (answer == null || !answer.trimLeft().startsWith('[')) return null;
+    try {
+      final v = jsonDecode(answer);
+      return v is List ? [for (final e in v) '$e'] : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = ref.watch(appStringsProvider);
+    final item = widget.item;
+    final scheme = Theme.of(context).colorScheme;
+    final pending = item.streaming && item.answer == null;
+    final answer = item.answer;
+    final answers = item.multiple ? _answers(answer) : null;
+    bool chosen(String o) => answers?.contains(o) ?? o == answer;
+    return _CardFrame(
+      pending: pending,
+      icon: Icons.help_outline,
+      title: item.text,
+      children: [
+        if (item.options.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in item.options)
+                if (item.multiple && pending)
+                  FilterChip(
+                    key: ValueKey('assistant-option-$option'),
+                    label: Text(option),
+                    selected: _picked.contains(option),
+                    onSelected: (v) => setState(
+                        () => v ? _picked.add(option) : _picked.remove(option)),
+                  )
+                else if (chosen(option))
+                  Chip(
+                    avatar:
+                        Icon(Icons.check, size: 18, color: scheme.onPrimary),
+                    label: Text(option),
+                    labelStyle: TextStyle(
+                        color: scheme.onPrimary, fontWeight: FontWeight.w600),
+                    backgroundColor: scheme.primary,
+                    side: BorderSide.none,
+                  )
+                else
+                  OutlinedButton(
+                    key: ValueKey('assistant-option-$option'),
+                    onPressed: pending ? () => widget.onAnswer(option) : null,
+                    child: Text(option),
+                  ),
+            ],
+          ),
+          if (item.multiple && pending) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              key: const ValueKey('assistant-confirm-choices'),
+              onPressed: _picked.isEmpty
+                  ? null
+                  : () => widget.onAnswer(jsonEncode([
+                        for (final o in item.options)
+                          if (_picked.contains(o)) o,
+                      ])),
+              icon: const Icon(Icons.check, size: 18),
+              label: Text(strings.richConfirm),
+            ),
+          ],
+        ],
+        if (answer != null && answers == null && !item.options.contains(answer))
+          _TypedAnswer(answer: answer),
+      ],
+    );
+  }
+}
+
+class _TypedAnswer extends StatelessWidget {
+  const _TypedAnswer({required this.answer});
+
+  final String answer;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text('↳ $answer',
+          style: theme.textTheme.bodyMedium
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+    );
+  }
+}
+
+/// The frame of a question or form: highlighted while it waits.
+class _CardFrame extends StatelessWidget {
+  const _CardFrame({
+    required this.pending,
+    required this.icon,
+    required this.title,
+    required this.children,
+  });
+
+  final bool pending;
+  final IconData icon;
+  final String title;
+  final List<Widget> children;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final pending = item.streaming && item.answer == null;
-    final answer = item.answer;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -265,79 +411,391 @@ class QuestionCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.help_outline, size: 20, color: scheme.primary),
+              Icon(icon, size: 20, color: scheme.primary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  item.text,
+                  title,
                   style: theme.textTheme.bodyLarge
                       ?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
           ),
-          if (item.options.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final option in item.options)
-                  option == answer
-                      ? Chip(
-                          avatar: Icon(Icons.check,
-                              size: 18, color: scheme.onPrimary),
-                          label: Text(option),
-                          labelStyle: TextStyle(
-                              color: scheme.onPrimary,
-                              fontWeight: FontWeight.w600),
-                          backgroundColor: scheme.primary,
-                          side: BorderSide.none,
-                        )
-                      : OutlinedButton(
-                          key: ValueKey('assistant-option-$option'),
-                          onPressed: pending ? () => onAnswer(option) : null,
-                          child: Text(option),
-                        ),
-              ],
-            ),
-          ],
-          if (answer != null && !item.options.contains(answer)) ...[
-            const SizedBox(height: 8),
-            Text('↳ $answer',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant)),
-          ],
+          ...children,
         ],
       ),
     );
   }
 }
 
+/// A form from the agent (`ask_form`): text, number, date (with a calendar),
+/// single or multiple choice, yes/no. Sent as one JSON answer; once sent,
+/// the values stay visible.
+class FormCard extends ConsumerStatefulWidget {
+  const FormCard({required this.item, required this.onAnswer, super.key});
+
+  final ChatItem item;
+  final ValueChanged<String> onAnswer;
+
+  @override
+  ConsumerState<FormCard> createState() => _FormCardState();
+}
+
+class _FormCardState extends ConsumerState<FormCard> {
+  final _values = <String, Object?>{};
+  final _controllers = <String, TextEditingController>{};
+  final _missing = <String>{};
+
+  List<Map<String, dynamic>> get _fields => widget.item.fields;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final f in _fields) {
+      final name = '${f['name']}';
+      final type = '${f['type'] ?? 'text'}';
+      final def = f['default'];
+      switch (type) {
+        case 'bool':
+          _values[name] = def == true || '$def' == 'true';
+        case 'multichoice':
+          _values[name] = <String>[
+            if (def != null)
+              for (final e in '$def'.split(','))
+                if (e.trim().isNotEmpty) e.trim(),
+          ];
+        case 'choice' || 'date':
+          _values[name] = def?.toString();
+        default:
+          _controllers[name] =
+              TextEditingController(text: def?.toString() ?? '');
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _submit() {
+    final out = <String, Object?>{};
+    _missing.clear();
+    for (final f in _fields) {
+      final name = '${f['name']}';
+      final type = '${f['type'] ?? 'text'}';
+      Object? v = _controllers[name]?.text.trim() ?? _values[name];
+      if (type == 'number' && v is String && v.isNotEmpty) {
+        v = toNumber(v) ?? v;
+      }
+      final empty =
+          v == null || (v is String && v.isEmpty) || (v is List && v.isEmpty);
+      if (f['required'] == true && empty) _missing.add(name);
+      out[name] = empty ? null : v;
+    }
+    if (_missing.isNotEmpty) {
+      setState(() {});
+      return;
+    }
+    widget.onAnswer(jsonEncode(out));
+  }
+
+  Future<void> _pickDate(String name) async {
+    final current = DateTime.tryParse('${_values[name]}') ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      setState(() => _values[name] = picked.toIso8601String().substring(0, 10));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = ref.watch(appStringsProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final item = widget.item;
+    final pending = item.streaming && item.answer == null;
+
+    if (!pending) {
+      Map<String, dynamic>? sent;
+      try {
+        final v = jsonDecode(item.answer ?? '');
+        if (v is Map) sent = v.cast<String, dynamic>();
+      } catch (_) {}
+      return _CardFrame(
+        pending: false,
+        icon: Icons.assignment_outlined,
+        title: item.text,
+        children: [
+          if (sent != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final f in _fields)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text.rich(TextSpan(children: [
+                        TextSpan(
+                          text: '${f['label'] ?? f['name']} : ',
+                          style: TextStyle(color: scheme.onSurfaceVariant),
+                        ),
+                        TextSpan(
+                          text: _show(sent[f['name']], strings),
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ])),
+                    ),
+                ],
+              ),
+            )
+          else if (item.answer != null)
+            _TypedAnswer(answer: item.answer!),
+        ],
+      );
+    }
+
+    return _CardFrame(
+      pending: true,
+      icon: Icons.assignment_outlined,
+      title: item.text,
+      children: [
+        const SizedBox(height: 6),
+        for (final f in _fields) _field(f, strings, scheme),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            key: const ValueKey('assistant-form-submit'),
+            onPressed: _submit,
+            icon: const Icon(Icons.send, size: 18),
+            label: Text(strings.richSubmit),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _show(Object? v, AppStrings strings) => switch (v) {
+        null => '—',
+        true => strings.richYes,
+        false => strings.richNo,
+        List() => v.join(', '),
+        _ => '$v',
+      };
+
+  Widget _field(
+      Map<String, dynamic> f, AppStrings strings, ColorScheme scheme) {
+    final name = '${f['name']}';
+    final label = '${f['label'] ?? name}${f['required'] == true ? ' *' : ''}';
+    final type = '${f['type'] ?? 'text'}';
+    final hint = f['hint']?.toString();
+    final rawOptions = f['options'];
+    final options = [
+      if (rawOptions is List)
+        for (final o in rawOptions) '$o',
+    ];
+    final error = _missing.contains(name) ? strings.richRequired : null;
+    final key = ValueKey('assistant-field-$name');
+    Widget labelled(Widget child) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 4),
+              child,
+              if (error != null)
+                Text(error,
+                    style: TextStyle(color: scheme.error, fontSize: 12)),
+            ],
+          ),
+        );
+    switch (type) {
+      case 'bool':
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              Expanded(
+                child:
+                    Text(label, style: Theme.of(context).textTheme.labelLarge),
+              ),
+              Switch(
+                key: key,
+                value: _values[name] == true,
+                onChanged: (v) => setState(() => _values[name] = v),
+              ),
+            ],
+          ),
+        );
+      case 'choice':
+        return labelled(Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final o in options)
+              ChoiceChip(
+                key: ValueKey('assistant-field-$name-$o'),
+                label: Text(o),
+                selected: _values[name] == o,
+                onSelected: (_) => setState(() => _values[name] = o),
+              ),
+          ],
+        ));
+      case 'multichoice':
+        final picked = _values[name] as List<String>;
+        return labelled(Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final o in options)
+              FilterChip(
+                key: ValueKey('assistant-field-$name-$o'),
+                label: Text(o),
+                selected: picked.contains(o),
+                onSelected: (v) =>
+                    setState(() => v ? picked.add(o) : picked.remove(o)),
+              ),
+          ],
+        ));
+      case 'date':
+        return labelled(OutlinedButton.icon(
+          key: key,
+          onPressed: () => _pickDate(name),
+          icon: const Icon(Icons.event_outlined, size: 18),
+          label: Text(_values[name]?.toString() ?? strings.richPickDate),
+        ));
+      default:
+        return labelled(TextField(
+          key: key,
+          controller: _controllers[name],
+          minLines: type == 'multiline' ? 3 : 1,
+          maxLines: type == 'multiline' ? 6 : 1,
+          keyboardType: type == 'number'
+              ? const TextInputType.numberWithOptions(
+                  decimal: true, signed: true)
+              : null,
+          decoration: InputDecoration(
+            hintText: hint,
+            isDense: true,
+            filled: true,
+            fillColor: scheme.surface,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ));
+    }
+  }
+}
+
 /// The assistant's answer: plain text across the whole width, with a
-/// blinking cursor while tokens arrive.
+/// blinking cursor while tokens arrive; once done, small buttons to copy it
+/// (Markdown or plain text), save it as a note or share it.
 class AssistantMessage extends ConsumerWidget {
   const AssistantMessage({required this.item, super.key});
 
   final ChatItem item;
 
+  Future<void> _saveNote(BuildContext context, WidgetRef ref) async {
+    final strings = ref.read(appStringsProvider);
+    final heading = parseMarkdown(item.text).whereType<MdHeading>().firstOrNull;
+    var title = heading != null
+        ? plainInline(heading.text)
+        : markdownToPlainText(item.text).split('\n').first;
+    title = title.replaceAll(RegExp(r'[\\/:*?"<>|]'), ' ').trim();
+    if (title.length > 60) title = title.substring(0, 60).trim();
+    if (title.isEmpty) title = '${strings.assistant} ${stamp()}';
+    try {
+      final dir = await deganyExportDir(ref);
+      final path = await ref
+          .read(libraryControllerProvider)
+          .createNote(dir, title: title, content: item.text);
+      if (!context.mounted) return;
+      showChatSnack(
+        context,
+        strings.richSavedIn('$deganyExportFolder/${p.basename(path)}'),
+        action: SnackBarAction(
+          label: strings.richOpen,
+          onPressed: () async {
+            final route = await routeForPath(path);
+            if (context.mounted) unawaited(context.push(route));
+          },
+        ),
+      );
+    } on StateError {
+      if (context.mounted) showChatSnack(context, strings.needWorkspace);
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final strings = ref.watch(appStringsProvider);
     final scheme = Theme.of(context).colorScheme;
+    void copy(String text) {
+      Clipboard.setData(ClipboardData(text: text));
+      _snack(context, strings.copiedToClipboard);
+    }
+
     return GestureDetector(
-      onLongPress: () {
-        Clipboard.setData(ClipboardData(text: item.text));
-        _snack(context, ref.read(appStringsProvider).copiedToClipboard);
-      },
+      onLongPress: () => copy(item.text),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
-        child: SizedBox(
-          width: double.infinity,
-          child: RichMessage(
-            text: item.text,
-            color: scheme.onSurface,
-            streaming: item.streaming,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: double.infinity,
+              child: RichMessage(
+                text: item.text,
+                color: scheme.onSurface,
+                streaming: item.streaming,
+              ),
+            ),
+            if (!item.streaming && item.text.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    TinyIconButton(
+                      key: const ValueKey('degany-copy-markdown'),
+                      icon: Icons.copy_rounded,
+                      tooltip: strings.richCopyMarkdown,
+                      onPressed: () => copy(item.text),
+                    ),
+                    TinyIconButton(
+                      key: const ValueKey('degany-copy-text'),
+                      icon: Icons.notes,
+                      tooltip: strings.richCopyText,
+                      onPressed: () => copy(markdownToPlainText(item.text)),
+                    ),
+                    TinyIconButton(
+                      key: const ValueKey('degany-save-note'),
+                      icon: Icons.note_add_outlined,
+                      tooltip: strings.richSaveNote,
+                      onPressed: () => _saveNote(context, ref),
+                    ),
+                    TinyIconButton(
+                      key: const ValueKey('degany-share'),
+                      icon: Icons.share_outlined,
+                      tooltip: strings.share,
+                      onPressed: () => contentShareService.shareContent(
+                        text: markdownToPlainText(item.text),
+                        localMediaPaths: const [],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -865,306 +1323,6 @@ class _ActivityLineState extends ConsumerState<ActivityLine> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Renders the light Markdown the model writes (headings, bold, inline code,
-/// lists, fenced code blocks), turns `[[path]]` into buttons that open the
-/// item and URLs into links. Partial text (while streaming) renders fine.
-class RichMessage extends ConsumerWidget {
-  const RichMessage({
-    required this.text,
-    required this.color,
-    this.streaming = false,
-    super.key,
-  });
-
-  final String text;
-  final Color color;
-  final bool streaming;
-
-  static final _token = RegExp(
-    r'\[\[([^\]\n]+)\]\]|\*\*([^*\n]+)\*\*|`([^`\n]+)`|(https?://[^\s<>\]\)]+)',
-  );
-
-  /// ```lang … ``` — an unclosed fence (still streaming) runs to the end.
-  static final _fence = RegExp(r'```([^\n`]*)\n?([\s\S]*?)(?:```|$)');
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final children = <Widget>[];
-    var last = 0;
-    final matches = _fence.allMatches(text).toList();
-    for (final (i, m) in matches.indexed) {
-      if (m.start > last) {
-        children
-            .add(_prose(context, text.substring(last, m.start), cursor: false));
-      }
-      children.add(_CodeBlock(
-        code: m.group(2)!.replaceFirst(RegExp(r'\n$'), ''),
-        language: m.group(1)!.trim(),
-        cursor: streaming && i == matches.length - 1 && m.end == text.length,
-      ));
-      last = m.end;
-    }
-    if (last < text.length || children.isEmpty) {
-      children.add(_prose(context, text.substring(last), cursor: streaming));
-    } else if (streaming && matches.isEmpty) {
-      children.add(_prose(context, '', cursor: true));
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: children,
-    );
-  }
-
-  Widget _prose(BuildContext context, String chunk, {required bool cursor}) {
-    final theme = Theme.of(context);
-    final base =
-        theme.textTheme.bodyLarge!.copyWith(color: color, height: 1.45);
-    var trimmed = chunk.replaceFirst(RegExp(r'^\n+'), '');
-    // Blank lines before a code block are the block's own margin.
-    if (!cursor) trimmed = trimmed.replaceFirst(RegExp(r'\n+$'), '');
-    if (trimmed.isEmpty && !cursor) return const SizedBox.shrink();
-    final lines = trimmed.split('\n');
-    final spans = <InlineSpan>[];
-    for (final (i, rawLine) in lines.indexed) {
-      var line = rawLine;
-      var style = base;
-      final heading = RegExp(r'^\s{0,3}(#{1,6})\s+').firstMatch(line);
-      if (heading != null) {
-        line = line.substring(heading.end);
-        style = base.copyWith(
-          fontWeight: FontWeight.w700,
-          fontSize:
-              (base.fontSize ?? 16) + (heading.group(1)!.length <= 2 ? 2 : 0),
-        );
-      }
-      final bullet = RegExp(r'^(\s*)[-*•]\s+').firstMatch(line);
-      if (bullet != null) {
-        line = '${bullet.group(1)}  •  ${line.substring(bullet.end)}';
-      }
-      if (RegExp(r'^\s*(-{3,}|\*{3,})\s*$').hasMatch(line)) line = '';
-      _inline(context, line, style, spans);
-      if (i < lines.length - 1) spans.add(const TextSpan(text: '\n'));
-    }
-    if (cursor) {
-      spans.add(WidgetSpan(
-        alignment: PlaceholderAlignment.middle,
-        child: Blink(
-          child: Container(
-            width: 8,
-            height: (base.fontSize ?? 16) * 1.1,
-            margin: const EdgeInsets.only(left: 2),
-            color: theme.colorScheme.primary,
-          ),
-        ),
-      ));
-    }
-    return Text.rich(TextSpan(children: spans));
-  }
-
-  void _inline(BuildContext context, String line, TextStyle style,
-      List<InlineSpan> out) {
-    var last = 0;
-    for (final m in _token.allMatches(line)) {
-      if (m.start > last) {
-        out.add(TextSpan(text: line.substring(last, m.start), style: style));
-      }
-      if (m.group(1) != null) {
-        out.add(WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: PathChip(path: m.group(1)!.trim()),
-        ));
-      } else if (m.group(2) != null) {
-        out.add(TextSpan(
-            text: m.group(2),
-            style: style.copyWith(fontWeight: FontWeight.w700)));
-      } else if (m.group(3) != null) {
-        out.add(TextSpan(
-          text: m.group(3),
-          style: style.merge(_mono).copyWith(
-                fontSize: (style.fontSize ?? 16) * 0.9,
-                backgroundColor: color.withValues(alpha: 0.08),
-              ),
-        ));
-      } else {
-        final url = m.group(4)!;
-        out.add(TextSpan(
-          text: url,
-          style: style.copyWith(
-            color: Theme.of(context).colorScheme.primary,
-            decoration: TextDecoration.underline,
-          ),
-          recognizer: TapGestureRecognizer()
-            ..onTap = () =>
-                launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-        ));
-      }
-      last = m.end;
-    }
-    if (last < line.length) {
-      out.add(TextSpan(text: line.substring(last), style: style));
-    }
-  }
-}
-
-class _CodeBlock extends ConsumerWidget {
-  const _CodeBlock({
-    required this.code,
-    required this.language,
-    required this.cursor,
-  });
-
-  final String code;
-  final String language;
-  final bool cursor;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    final muted = scheme.onSurfaceVariant;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 2, 2, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(language,
-                      style: _mono.copyWith(color: muted, fontSize: 12)),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 16,
-                  tooltip: ref.watch(appStringsProvider).copiedToClipboard,
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: code));
-                    _snack(context,
-                        ref.read(appStringsProvider).copiedToClipboard);
-                  },
-                  icon: Icon(Icons.copy_rounded, color: muted),
-                ),
-              ],
-            ),
-          ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: Text(
-              cursor ? '$code▍' : code,
-              style: _mono.copyWith(
-                  fontSize: 13, color: scheme.onSurface, height: 1.4),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A direct link to a library item: tap opens it, long-press copies the path.
-class PathChip extends ConsumerWidget {
-  const PathChip({required this.path, super.key});
-
-  /// Workspace-relative (or absolute) path written by the model.
-  final String path;
-
-  String? _absolute(String? root) {
-    final raw = path.replaceAll('\\', '/');
-    if (p.isAbsolute(raw) || RegExp(r'^[A-Za-z]:/').hasMatch(raw)) {
-      return p.normalize(raw);
-    }
-    if (root == null) return null;
-    return p
-        .normalize(p.join(root, raw.startsWith('/') ? raw.substring(1) : raw));
-  }
-
-  IconData _icon(String abs) {
-    if (FileSystemEntity.isDirectorySync(abs)) return Icons.folder_outlined;
-    return switch (kindForFile(abs)) {
-      EntryKind.image => Icons.image_outlined,
-      EntryKind.video => Icons.movie_outlined,
-      EntryKind.note => Icons.description_outlined,
-      _ => p.extension(abs).toLowerCase() == '.json'
-          ? Icons.table_chart_outlined
-          : Icons.insert_drive_file_outlined,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final strings = ref.watch(appStringsProvider);
-    final scheme = Theme.of(context).colorScheme;
-    final abs = _absolute(ref.watch(workspaceRootProvider));
-    // No local files in a browser (web build): show a plain label.
-    final exists = !kIsWeb &&
-        abs != null &&
-        FileSystemEntity.typeSync(abs) != FileSystemEntityType.notFound;
-    final label = path.isEmpty ? '/' : p.basename(path.replaceAll('\\', '/'));
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Tooltip(
-        message: path,
-        child: Material(
-          color: exists ? scheme.primaryContainer : scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(8),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () async {
-              if (!exists) {
-                _snack(context, strings.itemNotFound);
-                return;
-              }
-              final route = await routeForPath(abs);
-              if (context.mounted) unawaited(context.push(route));
-            },
-            onLongPress: abs == null
-                ? null
-                : () {
-                    Clipboard.setData(ClipboardData(text: abs));
-                    _snack(context, strings.pathCopied);
-                  },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    exists ? _icon(abs) : Icons.link_off,
-                    size: 15,
-                    color: exists
-                        ? scheme.onPrimaryContainer
-                        : scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      label,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: exists
-                                ? scheme.onPrimaryContainer
-                                : scheme.onSurfaceVariant,
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

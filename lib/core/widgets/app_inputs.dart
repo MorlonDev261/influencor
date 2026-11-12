@@ -246,6 +246,9 @@ class AppChoiceChips<T> extends StatelessWidget {
           for (final (value, label) in options)
             ChoiceChip(
               avatar: avatar?.call(value),
+              // A selected chip draws its checkmark over the avatar with a
+              // dark disc: keep logos clean, the colour shows the choice.
+              showCheckmark: avatar == null,
               label: Text(label),
               selected: value == selected,
               onSelected: (_) => onChanged(value),

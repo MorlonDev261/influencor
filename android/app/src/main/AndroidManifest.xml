@@ -36,21 +36,29 @@
             <meta-data
               android:name="flutter_deeplinking_enabled"
               android:value="false" />
-            <!--
-                Android App Links for the reseller space. Influencor is the
-                first handler of https://reseller.poma-original.com/*; the
-                poma-original app (com.pomaoriginal.app) stays the fallback.
-                autoVerify needs https://reseller.poma-original.com/.well-known/
-                assetlinks.json to list this package + the release certificate
-                (served by the poma-original project, see docs/deep-links).
-            -->
+        </activity>
+        <!--
+            Android App Links for the reseller space. Influencor is the
+            first handler of https://reseller.poma-original.com/*; the
+            poma-original app (com.pomaoriginal.app) stays the fallback.
+            autoVerify needs https://reseller.poma-original.com/.well-known/
+            assetlinks.json to list this package + the release certificate
+            (served by the poma-original project, see docs/deep-links).
+            Disabled in builds without the reseller space (Google Play: the
+            dart-define INFLUENCOR_RESELLER=false, see build.gradle.kts).
+        -->
+        <activity-alias
+            android:name=".ResellerLinks"
+            android:targetActivity=".MainActivity"
+            android:enabled="${resellerLinks}"
+            android:exported="true">
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="reseller.poma-original.com"/>
             </intent-filter>
-        </activity>
+        </activity-alias>
         <!-- Channel of pushes received while the app is closed; created in
              MainActivity, same id as the server's `channelId`. -->
         <meta-data

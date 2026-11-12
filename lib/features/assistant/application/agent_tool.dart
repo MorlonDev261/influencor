@@ -25,11 +25,16 @@ typedef ConfirmAction = Future<bool> Function(String title, String message);
 /// Shows a route of the app (`push` keeps the chat underneath).
 typedef NavigateAction = void Function(String route, {required bool push});
 
-/// Asks the user a question in the chat, offering [options] as buttons; the
-/// user may also type a free answer. Resolves to null when unanswered
-/// (stopped).
+/// Asks the user a question in the chat, offering [options] as buttons
+/// (several may be picked when [multiple]: the answer is then a JSON list),
+/// or a form of [fields] (the answer is then a JSON object); the user may
+/// also type a free answer. Resolves to null when unanswered (stopped).
 typedef AskUser = Future<String?> Function(
-    String question, List<String> options);
+  String question,
+  List<String> options, {
+  bool multiple,
+  List<Map<String, dynamic>> fields,
+});
 
 /// What a tool can reach: the app's providers, the workspace, the user.
 class AgentToolContext {

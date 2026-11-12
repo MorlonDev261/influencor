@@ -8,9 +8,9 @@ import 'package:uuid/uuid.dart';
 import '../../../core/widgets/app_inputs.dart';
 import '../../../core/widgets/app_dialog.dart';
 import '../../../core/l10n/app_strings.dart';
-import '../../../core/providers/edit_mode_provider.dart';
 import '../../../core/providers/workspace_providers.dart';
 import '../../../core/widgets/empty_state.dart';
+import '../../../core/widgets/item_menu.dart';
 import '../application/accounting_providers.dart';
 import '../domain/ledger.dart';
 import '../domain/ledger_entry.dart';
@@ -44,15 +44,17 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
   /// The sheet on screen; null follows the open (current) sheet.
   String? _sheetId;
 
-  Future<void> _openEditor({LedgerEntry? entry, bool readOnly = false}) async {
+  /// Opens an entry: its details (with an edit button) or, with [edit] or
+  /// for a new entry, the form directly.
+  Future<void> _openEditor(
+      {LedgerEntry? entry, bool readOnly = false, bool edit = false}) async {
     final strings = ref.read(appStringsProvider);
-    final editing = ref.read(editModeProvider);
     final result = await showAppDialog<_EditorResult>(
       context,
       builder: (_) => _EntryDialog(
         entry: entry,
         strings: strings,
-        startEditing: !readOnly && (entry == null || editing),
+        startEditing: !readOnly && (entry == null || edit),
         readOnly: readOnly,
       ),
     );
@@ -63,6 +65,20 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
     } else {
       await controller.save(result.entry!);
     }
+  }
+
+  Future<void> _delete(LedgerEntry entry) async {
+    final s = ref.read(appStringsProvider);
+    final ok = await showConfirmDialog(
+      context,
+      title: s.deleteTransactionQuestion,
+      message: '${entry.note.isEmpty ? entry.type.text(s) : entry.note}'
+          ' · ${formatAr(entry.amount)}',
+      confirmLabel: s.delete,
+      cancelLabel: s.cancel,
+      destructive: true,
+    );
+    if (ok) await ref.read(ledgerProvider.notifier).remove(entry.id);
   }
 
   Future<void> _closeSheet(Ledger ledger) async {
@@ -93,7 +109,6 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
   Widget build(BuildContext context) {
     final strings = ref.watch(appStringsProvider);
     final hasWorkspace = ref.watch(workspaceRootProvider) != null;
-    final editing = ref.watch(editModeProvider);
     final ledger = ref.watch(ledgerProvider).value ?? Ledger.empty();
     final sheet = ledger.sheetById(_sheetId) ?? ledger.current;
     final isCurrent = sheet.isOpen;
@@ -114,10 +129,9 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
             icon: const Icon(Icons.currency_exchange_rounded),
             onPressed: () => context.push('/fees'),
           ),
-          if (hasWorkspace) const EditModeButton(),
         ],
       ),
-      floatingActionButton: hasWorkspace && editing && isCurrent
+      floatingActionButton: hasWorkspace && isCurrent
           ? FloatingActionButton.extended(
               onPressed: () => _openEditor(),
               icon: const Icon(Icons.add),
@@ -158,7 +172,6 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
                           strings: strings,
                           ledger: ledger,
                           sheet: sheet,
-                          canEdit: editing,
                           onSelect: (id) => setState(() =>
                               _sheetId = id == ledger.current.id ? null : id),
                           onClose: () => _closeSheet(ledger),
@@ -234,6 +247,13 @@ class _AccountingScreenState extends ConsumerState<AccountingScreen> {
                           strings: strings,
                           onTap: () => _openEditor(
                               entry: shown[i], readOnly: !isCurrent),
+                          menu: !isCurrent
+                              ? null
+                              : ItemMenuButton(
+                                  onEdit: () =>
+                                      _openEditor(entry: shown[i], edit: true),
+                                  onDelete: () => _delete(shown[i]),
+                                ),
                         ),
                       ),
                     ),
@@ -250,7 +270,6 @@ class _SheetBar extends StatelessWidget {
     required this.strings,
     required this.ledger,
     required this.sheet,
-    required this.canEdit,
     required this.onSelect,
     required this.onClose,
   });
@@ -258,7 +277,6 @@ class _SheetBar extends StatelessWidget {
   final AppStrings strings;
   final Ledger ledger;
   final LedgerSheet sheet;
-  final bool canEdit;
   final ValueChanged<String> onSelect;
   final VoidCallback onClose;
 
@@ -310,7 +328,7 @@ class _SheetBar extends StatelessWidget {
         icon: const Icon(Icons.undo_rounded, size: 18),
         label: Text(s.currentSheet),
       );
-    } else if (canEdit) {
+    } else {
       action = Tooltip(
         message: ledger.canClose ? s.closeSheet : s.closeSheetNeedsEntry,
         child: FilledButton.tonalIcon(
@@ -464,11 +482,15 @@ class _EntryTile extends StatelessWidget {
     required this.entry,
     required this.strings,
     required this.onTap,
+    this.menu,
   });
 
   final LedgerEntry entry;
   final AppStrings strings;
   final VoidCallback onTap;
+
+  /// "⋮" Edit / Delete menu; none on a closed sheet.
+  final Widget? menu;
 
   @override
   Widget build(BuildContext context) {
@@ -495,12 +517,21 @@ class _EntryTile extends StatelessWidget {
         '${formatDate(e.date)} · ${e.type.text(strings)}'
         ' · ${e.account.text(strings)}',
       ),
-      trailing: Text(
-        '${credit ? '+' : '-'}${formatAr(e.amount)}',
-        style: theme.textTheme.titleSmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w700,
-        ),
+      contentPadding: menu == null
+          ? null
+          : const EdgeInsetsDirectional.only(start: 16, end: 4),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${credit ? '+' : '-'}${formatAr(e.amount)}',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (menu != null) menu!,
+        ],
       ),
     );
   }
@@ -595,20 +626,35 @@ class _EntryDialogState extends State<_EntryDialog> {
     );
   }
 
-  Widget _detailRow(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.labelMedium),
-            Text(value, style: Theme.of(context).textTheme.bodyLarge),
-          ],
-        ),
-      );
+  /// "Label ……… value" line of the read view.
+  Widget _detailRow(String label, String value) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                style: theme.textTheme.bodyLarge
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildReadOnly(AppStrings s) {
     final e = widget.entry!;
     final credit = e.direction == LedgerDirection.credit;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final color = credit ? scheme.ledgerCredit : scheme.ledgerDebit;
     return AppDialog(
       title: e.type.text(s),
       titleActions: [
@@ -624,7 +670,50 @@ class _EntryDialogState extends State<_EntryDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _detailRow(s.amount, '${credit ? '+' : '-'}${formatAr(e.amount)}'),
+          // Read view: the amount stands out, nothing looks like a field.
+          Container(
+            key: const ValueKey('ledger-detail-amount'),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: color.withValues(alpha: 0.15),
+                  child: Icon(
+                    credit
+                        ? Icons.south_west_rounded
+                        : Icons.north_east_rounded,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(credit ? s.credit : s.debit,
+                          style: theme.textTheme.labelMedium
+                              ?.copyWith(color: color)),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '${credit ? '+' : '-'}${formatAr(e.amount)}',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                              color: color, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           _detailRow(s.account, e.account.text(s)),
           _detailRow(s.date, formatDate(e.date)),
           if (e.note.isNotEmpty) _detailRow(s.note, e.note),

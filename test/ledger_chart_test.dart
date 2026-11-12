@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:influencor/core/l10n/app_strings.dart';
-import 'package:influencor/core/providers/edit_mode_provider.dart';
 import 'package:influencor/core/providers/workspace_providers.dart';
 import 'package:influencor/features/accounting/application/accounting_providers.dart';
 import 'package:influencor/features/accounting/domain/ledger.dart';
@@ -51,11 +50,6 @@ class _MemoryLedger extends LedgerController {
     state = AsyncData(next);
     return next.sheetById(closed);
   }
-}
-
-class _EditOn extends EditModeNotifier {
-  @override
-  bool build() => true;
 }
 
 void main() {
@@ -128,7 +122,6 @@ void main() {
         overrides: [
           appStringsProvider.overrideWithValue(_fr),
           workspaceRootProvider.overrideWithValue('/workspace'),
-          editModeProvider.overrideWith(_EditOn.new),
           ledgerProvider.overrideWith(() => _MemoryLedger(ledger)),
         ],
         child: const MaterialApp(home: AccountingScreen()),

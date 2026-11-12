@@ -63,6 +63,27 @@ String _htmlToText(String html) {
       .trim();
 }
 
+const _fieldTypes = [
+  'text',
+  'multiline',
+  'number',
+  'date',
+  'choice',
+  'multichoice',
+  'bool',
+];
+
+/// The JSON a question card answers with, or null for typed text.
+Object? _decode(String answer) {
+  final t = answer.trim();
+  if (!(t.startsWith('[') || t.startsWith('{'))) return null;
+  try {
+    return jsonDecode(t);
+  } catch (_) {
+    return null;
+  }
+}
+
 List<AgentTool> appTools() => [
       AgentTool(
         name: 'ask_user',
@@ -72,10 +93,13 @@ List<AgentTool> appTools() => [
             'choix proposés en boutons (il peut aussi écrire une autre réponse). '
             'À utiliser quand une décision lui revient : où enregistrer un '
             'fichier nettoyé, quel dossier, quelle option… Une seule question '
-            'à la fois, 2 à 4 choix courts.',
+            'à la fois, 2 à 6 choix courts. multiple=true : il peut cocher '
+            'plusieurs choix (réponse "answers"). Pour plusieurs informations à '
+            'la fois (texte, nombre, date…), utiliser ask_form.',
         properties: {
           'question': sStr('La question, courte et claire.'),
-          'options': sStrList('Les choix proposés (2 à 4, courts).'),
+          'options': sStrList('Les choix proposés (2 à 6, courts).'),
+          'multiple': sBool('Plusieurs choix possibles (défaut : non).'),
         },
         required: ['question'],
         run: (a, ctx) async {
@@ -86,14 +110,88 @@ List<AgentTool> appTools() => [
           final options = [
             for (final o in a.strings('options'))
               if (o.trim().isNotEmpty) o.trim(),
-          ].take(6).toList();
-          final answer = await ask(a.str('question'), options);
+          ].take(8).toList();
+          final multiple = a.flag('multiple') && options.length > 1;
+          final answer =
+              await ask(a.str('question'), options, multiple: multiple);
           if (answer == null) {
             return {
               'answer': null,
               'note': "Pas de réponse : l'utilisateur a arrêté."
             };
           }
+          if (multiple) {
+            final picked = _decode(answer);
+            if (picked is List) return {'answers': picked};
+          }
+          return {'answer': answer};
+        },
+      ),
+      AgentTool(
+        name: 'ask_form',
+        label: 'Formulaire',
+        description:
+            'Affiche un petit formulaire dans la conversation et attend que '
+            "l'utilisateur le remplisse : plusieurs informations en une fois "
+            '(ex. nom du client, montant, date de livraison, compte). Types : '
+            'text, multiline, number, date (AAAA-MM-JJ, avec calendrier), '
+            'choice (options, un seul), multichoice (options, plusieurs), bool. '
+            'Réponse : "values" {name: valeur}, ou "answer" si '
+            "l'utilisateur a écrit sa réponse au lieu de remplir.",
+        properties: {
+          'title': sStr('Titre du formulaire (ce qui est demandé).'),
+          'fields': sList(
+            "Les champs, dans l'ordre (1 à 10).",
+            sObj({
+              'name': sStr('Identifiant (clé de la réponse).'),
+              'label': sStr('Libellé affiché.'),
+              'type': sStr('Type.', values: _fieldTypes),
+              'options': sStrList('Pour choice / multichoice.'),
+              'required': sBool('Obligatoire.'),
+              'default': sStr('Valeur proposée.'),
+              'hint': sStr('Aide affichée dans le champ.'),
+            }, required: [
+              'name',
+              'label'
+            ]),
+          ),
+        },
+        required: ['title', 'fields'],
+        run: (a, ctx) async {
+          final ask = ctx.ask;
+          if (ask == null) {
+            throw const ToolError("La conversation n'est pas affichée.");
+          }
+          final fields = <Map<String, dynamic>>[];
+          final names = <String>{};
+          for (final raw in a.list('fields')) {
+            if (raw is! Map) continue;
+            final f = ToolArgs(raw.cast<String, dynamic>());
+            final name = f.optStr('name')?.trim();
+            if (name == null || !names.add(name)) continue;
+            final type = f.optStr('type') ?? 'text';
+            fields.add({
+              'name': name,
+              'label': f.optStr('label') ?? name,
+              'type': _fieldTypes.contains(type) ? type : 'text',
+              if (f.strings('options').isNotEmpty)
+                'options': f.strings('options').take(12).toList(),
+              if (f.flag('required')) 'required': true,
+              if (f.optStr('default') case final d?) 'default': d,
+              if (f.optStr('hint') case final h?) 'hint': h,
+            });
+            if (fields.length == 10) break;
+          }
+          if (fields.isEmpty) throw const ToolError('Au moins un champ.');
+          final answer = await ask(a.str('title'), const [], fields: fields);
+          if (answer == null) {
+            return {
+              'values': null,
+              'note': "Pas de réponse : l'utilisateur a arrêté."
+            };
+          }
+          final values = _decode(answer);
+          if (values is Map) return {'values': values};
           return {'answer': answer};
         },
       ),

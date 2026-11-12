@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'constants/app_constants.dart';
 import '../features/about/presentation/about_screen.dart';
 import '../features/accounting/presentation/accounting_screen.dart';
 import '../features/fees/presentation/fees_screen.dart';
@@ -135,7 +136,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) {
               final id = state.uri.queryParameters['id'];
               if (id == null) return const TasksScreen();
-              return TaskEditorScreen(taskId: id);
+              return TaskEditorScreen(
+                taskId: id,
+                startEditing: state.uri.queryParameters['edit'] == '1',
+              );
             },
           ),
           GoRoute(
@@ -146,10 +150,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/about',
             builder: (context, state) => const AboutScreen(),
           ),
-          GoRoute(
-            path: '/pro',
-            builder: (context, state) => const ResellerLoginScreen(),
-          ),
+          if (AppConstants.resellerEnabled)
+            GoRoute(
+              path: '/pro',
+              builder: (context, state) => const ResellerLoginScreen(),
+            ),
         ],
       ),
     ],

@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -42,6 +43,18 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Reseller App Links (AndroidManifest `.ResellerLinks`) only in builds
+        // that keep the reseller space: the Google Play build passes
+        // --dart-define=INFLUENCOR_RESELLER=false (Flutter forwards dart-defines
+        // to Gradle, base64-encoded and comma-separated).
+        val dartDefines = (project.findProperty("dart-defines") as String?)
+            ?.split(",")
+            ?.filter { it.isNotBlank() }
+            ?.map { String(Base64.getDecoder().decode(it)) }
+            .orEmpty()
+        manifestPlaceholders["resellerLinks"] =
+            dartDefines.none { it.trim() == "INFLUENCOR_RESELLER=false" }.toString()
     }
 
     signingConfigs {

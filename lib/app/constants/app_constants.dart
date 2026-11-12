@@ -5,6 +5,13 @@ abstract final class AppConstants {
   /// Keep in sync with `version:` in pubspec.yaml (without the build number).
   static const String version = '1.0.0';
 
+  /// The professional (reseller) space of Pôma Original. The Google Play build
+  /// leaves it out entirely (`--dart-define=INFLUENCOR_RESELLER=false`, see
+  /// tools/build_full_release.ps1): no « Accès professionnel » entry, no
+  /// reseller home, no reseller links or pushes. The APK of the website keeps it.
+  static const bool resellerEnabled =
+      bool.fromEnvironment('INFLUENCOR_RESELLER', defaultValue: true);
+
   /// Public privacy policy (influencor-web): English page for English,
   /// French page otherwise (also for Malagasy).
   static String privacyPolicyUrl(String languageCode) => languageCode == 'en'

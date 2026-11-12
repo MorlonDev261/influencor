@@ -85,8 +85,9 @@ Un APK téléchargé depuis le site déclenche les avertissements Android
 (« sources inconnues », Play Protect). Installée depuis Google Play,
 l'application n'en affiche aucun.
 
-L'AAB (`Influencor.aab` dans `dist/`) est signé avec la clé d'upload
-(`android/key.properties` → `android/app/influencor-release.jks`), `targetSdk`
+L'AAB (`Influencor.aab` dans `dist/`) est signé avec
+`android/app/influencor-release.jks` (`android/key.properties`), la même clé
+que les APK du site et la clé de signature importée dans Play, `targetSdk`
 36. Ne jamais perdre ce keystore ni ses mots de passe.
 
 Publication pas à pas (compte, fiche, déclarations, test fermé, production,

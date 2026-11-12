@@ -128,6 +128,10 @@ final userProfileProvider =
 /// Tools that work out of sight: no action line in the chat.
 const silentTools = {'update_user_profile'};
 
+/// Tools that show as a card the user answers (question, form), not as an
+/// action line.
+const questionTools = {'ask_user', 'ask_form'};
+
 /// Folders holding the app's own data — settings, API keys (the Windows
 /// encrypted file, Android's encrypted preferences), the conversation. The
 /// assistant's tools can never reach them. Overridden in tests.
@@ -186,6 +190,8 @@ class ChatItem {
     this.options = const [],
     this.answer,
     this.attachments = const [],
+    this.multiple = false,
+    this.fields = const [],
   });
 
   final ChatItemKind kind;
@@ -200,9 +206,16 @@ class ChatItem {
   /// Still receiving tokens — or, for a question, waiting for the answer.
   final bool streaming;
 
-  /// For a question: the proposed choices, then the user's answer.
+  /// For a question: the proposed choices, then the user's answer (a JSON
+  /// list when [multiple], a JSON object for a form, or text the user typed).
   final List<String> options;
   final String? answer;
+
+  /// For a question: several choices may be picked.
+  final bool multiple;
+
+  /// For a form (`ask_form`): its fields (name, label, type, options…).
+  final List<Map<String, dynamic>> fields;
 
   /// For a user message: the files they attached (absolute paths).
   final List<String> attachments;
@@ -236,6 +249,8 @@ class ChatItem {
         options: options,
         answer: answer ?? this.answer,
         attachments: attachments,
+        multiple: multiple,
+        fields: fields,
       );
 
   Map<String, dynamic> toJson() => {
@@ -250,6 +265,8 @@ class ChatItem {
         if (options.isNotEmpty) 'options': options,
         if (answer != null) 'answer': answer,
         if (attachments.isNotEmpty) 'attachments': attachments,
+        if (multiple) 'multiple': true,
+        if (fields.isNotEmpty) 'fields': fields,
       };
 
   static ChatItem? fromJson(Object? json) {
@@ -259,6 +276,7 @@ class ChatItem {
     List<String> strings(Object? v) =>
         v is List ? [for (final e in v) '$e'] : const [];
     final args = json['args'];
+    final fields = json['fields'];
     var status = ToolStatus.values.firstWhere((s) => s.name == json['status'],
         orElse: () => ToolStatus.done);
     // A tool still running when the app closed never finished.
@@ -275,6 +293,12 @@ class ChatItem {
       options: strings(json['options']),
       answer: json['answer'] as String?,
       attachments: strings(json['attachments']),
+      multiple: json['multiple'] == true,
+      fields: [
+        if (fields is List)
+          for (final f in fields)
+            if (f is Map) f.cast<String, dynamic>(),
+      ],
     );
   }
 }
@@ -524,8 +548,14 @@ class AssistantChatController extends Notifier<AssistantChatState> {
     ]);
   }
 
-  /// Shows a question with its choices and waits for [answer].
-  Future<String?> _ask(String question, List<String> options) {
+  /// Shows a question with its choices (or a form of [fields]) and waits for
+  /// [answer].
+  Future<String?> _ask(
+    String question,
+    List<String> options, {
+    bool multiple = false,
+    List<Map<String, dynamic>> fields = const [],
+  }) {
     _pendingAnswer?.complete(null);
     final pending = _pendingAnswer = Completer<String?>();
     _questionAt = state.items.length;
@@ -533,6 +563,8 @@ class AssistantChatController extends Notifier<AssistantChatState> {
       kind: ChatItemKind.question,
       text: question,
       options: options,
+      multiple: multiple,
+      fields: fields,
       streaming: true,
     ));
     return pending.future;
@@ -955,9 +987,37 @@ How to work:
 - Amounts are in Ariary (Ar) unless the user says otherwise.
 - Reply in the user's language (default: $language). Be concise and friendly; use short lists when helpful. You can write captions, posts and texts for the user and save them as notes when asked.
 
+$_displayGuide
+
 ${memory ? _memoryPrompt(ref.read(userProfileProvider).value ?? const UserProfile()) : ''}Context: today is ${now.toIso8601String().substring(0, 10)}. Workspace root: ${root ?? '(none chosen yet — library tools will fail until the user picks one in Settings)'}.''';
   }
 }
+
+/// How Degany can show things in its answers: Markdown, and fenced blocks
+/// the app draws as charts, cards and buttons (see `presentation/rich/`).
+const _displayGuide = r'''
+How your answers are displayed (the app renders them; use the richest form that helps, never for the sake of it):
+- Markdown: # headings, **bold**, *italic*, ~~strike~~, `code`, [text](https://…), lists (1. numbered, - bullets, nested by indenting 2 spaces, "- [ ]" / "- [x]" checklists), > quotes, --- rules, tables (| a | b | with a |---| line; numbers align right; the user can copy them or save them as a table or CSV), ```lang code blocks (coloured), formulas $x^2$ or $$\frac{a}{b}$$, images ![caption](Photos/a.jpg) (a workspace picture, or an https image URL): one image shows whole, several in one paragraph show as a grid, a tap opens the viewer. To show the user a picture of their library, show it this way rather than only linking it.
+- Rich blocks: a fenced block whose language is one of the names below, holding JSON (valid, double quotes, no comments). Write the whole block in one go; anything else in the block shows as code.
+  ```chart {"type":"line|bar|hbar|area|pie|donut|scatter|sparkline","title":"…","unit":"Ar","labels":["Jan","Fév"],"series":[{"name":"Ventes","data":[120000,98000]}],"stacked":false} — pie/donut: "data":[{"label":"MVola","value":40}]; scatter: series [{"name":"…","points":[[x,y]]}]. For trends, comparisons and shares of real numbers (accounting summaries, sales by month, expenses by type).
+  ```kpi [{"label":"Ventes","value":1250000,"unit":"Ar","change":12.5,"hint":"vs octobre","trend":[3,5,4,8],"icon":"sale"}] — key figures (change in %, "good":"down" when lower is better).
+  ```progress {"title":"…","style":"bar|gauge","items":[{"label":"Objectif","value":750000,"max":1000000,"unit":"Ar"}]}
+  ```callout {"type":"info|success|warning|error|tip","title":"…","text":"Markdown text"} (or ```warning with plain text inside).
+  ```list {"title":"…","items":[{"title":"…","subtitle":"…","value":"…","badge":"…","icon":"task|note|money|user|calendar|…","path":"library/path","url":"https://…"}]} — items that open a library item or a link.
+  ```timeline {"title":"…","items":[{"date":"12/11","title":"…","text":"…","status":"done|current|todo"}]} — plans, steps, schedules.
+  ```mermaid graph TD; A[Idée] --> B{Validé ?}; B -->|oui| C(Publier) — flowcharts and org charts (graph/flowchart TD or LR only).
+  ```table {"columns":["…"],"rows":[["…"]]} and ```csv for big data; ```math for a long formula.
+  ```actions [{"label":"Créer la tâche","message":"Crée la tâche « … » avec …","icon":"task"}] — buttons under your answer; a tap sends "message" to you as the user's request. Offer the 1–3 most useful next steps after a result, never actions already done.
+  ```suggestions ["Et le mois dernier ?","Compare avec MVola"] — short follow-up questions the user can tap.
+  ```task {"id":"<task id>"} — the live task card (its checklist can be ticked). Use after creating or reading a task.
+  ```ledger {"title":"…","from":"2026-11-01","to":"2026-11-30","account":"mvola","type":"sale","sheet":"current|all","limit":6} — live accounting statement with totals and chart, read by the app itself (all fields optional).
+  ```fees {"title":"…","amount":200000,"operation":"Retrait","options":[{"label":"MVola","fee":2500,"detail":"2 × 100 000"}]} — mobile money comparison from the fee tools' results; the cheapest is highlighted.
+  ```gallery {"title":"…","paths":["Photos/a.jpg"]} — thumbnails of library pictures/videos. ```preview {"path":"Clients/brief.md"} — first lines of a note, rows of a table, a picture or a folder's content.
+  ```meta {"file":"photo.jpg","risk":"Position GPS présente","groups":[{"title":"GPS","rows":[["Latitude","-18.91"]]}]} — what Deganeo found (values hidden until the user shows them).
+  ```map {"places":[{"name":"…","address":"…","lat":-18.91,"lng":47.52}]} — places with a button opening a map.
+- Numbers in blocks are plain numbers (1250000, not "1 250 000 Ar"); only use real data from tools or the user, never invented figures. Paths in blocks are workspace-relative and must exist.
+- To collect several pieces of information at once (name, amount, date, choice…), use the ask_form tool instead of asking one question after another; ask_user with multiple=true lets the user tick several choices.
+''';
 
 /// What Degany knows about the user, and how to keep it.
 String _memoryPrompt(UserProfile profile) {

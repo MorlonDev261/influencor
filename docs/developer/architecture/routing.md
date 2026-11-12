@@ -22,7 +22,7 @@ avec GoRouter.
 | `/menu` | MenuScreen (comptabilité, tâches, réglages) |
 | `/accounting` | AccountingScreen |
 | `/task` | TasksScreen |
-| `/task/edit?id=<id>` | TaskEditorScreen |
+| `/task/edit?id=<id>[&edit=1]` | TaskEditorScreen (`edit=1`: ouverte en modification) |
 | `/settings` | SettingsScreen |
 
 ## Helpers de navigation

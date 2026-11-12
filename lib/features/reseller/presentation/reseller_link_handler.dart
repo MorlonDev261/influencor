@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/constants/app_constants.dart';
 import '../../../core/providers/settings_providers.dart';
 import '../../../shared/enums/enums.dart';
 import '../application/reseller_providers.dart';
@@ -37,8 +38,10 @@ class _ResellerLinkHandlerState extends ConsumerState<ResellerLinkHandler> {
   @override
   void initState() {
     super.initState();
-    // Deep links only exist on the mobile platforms.
-    if (kIsWeb ||
+    // Deep links only exist on the mobile platforms, and only in builds that
+    // include the reseller space.
+    if (!AppConstants.resellerEnabled ||
+        kIsWeb ||
         !(defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS)) {
       return;
@@ -84,7 +87,7 @@ class _ResellerLinkHandlerState extends ConsumerState<ResellerLinkHandler> {
   Widget build(BuildContext context) {
     // Once there is a reseller session, a tapped notification opens its page.
     ref.listen<bool>(settingsProvider.select((s) => s.reseller), (_, active) {
-      if (active) _listenForNotificationTaps();
+      if (active && AppConstants.resellerEnabled) _listenForNotificationTaps();
     });
     return widget.child;
   }

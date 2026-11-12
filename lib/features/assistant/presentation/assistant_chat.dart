@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -190,6 +191,9 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
         onNotification: _onScroll,
         child: ListView.builder(
           controller: _scroll,
+          // Answers with charts are tall: build them a bit before they
+          // scroll in, so they don't appear mid-scroll.
+          scrollCacheExtent: const ScrollCacheExtent.pixels(1500),
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           itemCount: entries.length + (waiting ? 1 : 0),
           itemBuilder: (context, i) {
@@ -212,14 +216,17 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
             return switch (item.kind) {
               ChatItemKind.user =>
                 UserMessage(text: item.text, attachments: item.attachments),
-              ChatItemKind.question =>
-                QuestionCard(item: item, onAnswer: _chat.answer),
-              ChatItemKind.assistant => AssistantMessage(item: item),
+              ChatItemKind.question when item.fields.isNotEmpty =>
+                _KeepAlive(child: FormCard(item: item, onAnswer: _chat.answer)),
+              ChatItemKind.question => _KeepAlive(
+                  child: QuestionCard(item: item, onAnswer: _chat.answer)),
+              ChatItemKind.assistant =>
+                _KeepAlive(child: AssistantMessage(item: item)),
               ChatItemKind.thinking => ThinkingBlock(item: item),
               // A question shows as its own card, not as an action line;
               // silent tools show nothing.
               ChatItemKind.tool
-                  when item.toolName == 'ask_user' ||
+                  when questionTools.contains(item.toolName) ||
                       silentTools.contains(item.toolName) =>
                 const SizedBox.shrink(),
               ChatItemKind.tool => ToolActivity(item: item),
@@ -309,7 +316,8 @@ class _AssistantChatPageState extends ConsumerState<AssistantChatPage> {
 List<(int, int)> _entries(List<ChatItem> items) {
   bool inRun(ChatItem item) =>
       item.kind == ChatItemKind.thinking ||
-      (item.kind == ChatItemKind.tool && item.toolName != 'ask_user');
+      (item.kind == ChatItemKind.tool &&
+          !questionTools.contains(item.toolName));
   final out = <(int, int)>[];
   var i = 0;
   while (i < items.length) {
@@ -331,6 +339,31 @@ List<(int, int)> _entries(List<ChatItem> items) {
     }
   }
   return out;
+}
+
+/// Keeps a chat entry built once it scrolled out of view: an answer with
+/// charts, previews and pictures is costly to rebuild (and its loaded parts
+/// would flash and change height on the way back), and a form keeps what
+/// was typed in it.
+class _KeepAlive extends StatefulWidget {
+  const _KeepAlive({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
 }
 
 class _ChatHeader extends ConsumerWidget {

@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/providers/settings_providers.dart';
+import '../core/widgets/smooth_wheel_scroll.dart';
 import '../features/reseller/presentation/reseller_link_handler.dart';
 import 'constants/app_constants.dart';
 import 'router.dart';
@@ -66,11 +67,12 @@ class _AppScrollBehavior extends MaterialScrollBehavior {
   ScrollPhysics getScrollPhysics(BuildContext context) =>
       const ClampingScrollPhysics();
 
+  /// No overscroll glow; the mouse wheel glides instead of jumping.
   @override
   Widget buildOverscrollIndicator(
     BuildContext context,
     Widget child,
     ScrollableDetails details,
   ) =>
-      child;
+      SmoothWheelScroll(controller: details.controller, child: child);
 }

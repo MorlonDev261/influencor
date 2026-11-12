@@ -7,13 +7,13 @@
 La version est dans [pubspec.yaml](../../../pubspec.yaml):
 
 ```yaml
-version: 1.0.0+1
+version: 1.0.0+2
 ```
 
 Format Flutter:
 
 - `1.0.0`: version visible;
-- `+1`: build number.
+- `+2`: build number (le premier AAB Play est en `+2`, au-dessus des APK `+1` déjà distribués).
 
 ## Modifier la version
 

@@ -139,41 +139,43 @@ class AboutScreen extends ConsumerWidget {
                     icon: Icons.rule_outlined),
                 section(s.aboutLanguagesTitle, s.aboutLanguagesBody,
                     icon: Icons.language),
-                const Divider(height: 32),
-                Card(
-                  elevation: 0,
-                  color: scheme.surfaceContainerHighest,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.storefront_outlined,
-                                color: scheme.primary),
-                            const SizedBox(width: 8),
-                            Expanded(
-                                child: Text(s.aboutProTitle,
-                                    style: text.titleMedium)),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(s.aboutProBody, style: text.bodyMedium),
-                        const SizedBox(height: 14),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            key: const ValueKey('access-pro'),
-                            onPressed: () => context.go('/pro'),
-                            icon: const Icon(Icons.login),
-                            label: Text(s.accessPro),
+                if (AppConstants.resellerEnabled) ...[
+                  const Divider(height: 32),
+                  Card(
+                    elevation: 0,
+                    color: scheme.surfaceContainerHighest,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.storefront_outlined,
+                                  color: scheme.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                  child: Text(s.aboutProTitle,
+                                      style: text.titleMedium)),
+                            ],
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 6),
+                          Text(s.aboutProBody, style: text.bodyMedium),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              key: const ValueKey('access-pro'),
+                              onPressed: () => context.go('/pro'),
+                              icon: const Icon(Icons.login),
+                              label: Text(s.accessPro),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 16),
                 Center(
                   child: Text(

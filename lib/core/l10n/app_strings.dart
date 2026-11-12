@@ -826,6 +826,8 @@ class AppStrings {
   String get feeTransfer => _t('Transfert', 'Transfer', mg: 'Famindrana');
   String get feeOperator => _t('Opérateur', 'Operator', mg: 'Operatera');
   String get feeTo => _t('Vers', 'To', mg: 'Mankany');
+  String get feeOperation => _t('Opération', 'Operation', mg: 'Asa');
+  String get feeChannel => _t('Canal', 'Channel', mg: 'Fomba');
   String get feeChannelUssd => _t('USSD #144#', 'USSD #144#', mg: 'USSD #144#');
   String get feeChannelApp =>
       _t('Appli (−50 %)', 'App (−50%)', mg: 'Appli (−50 %)');
@@ -1227,6 +1229,72 @@ class AppStrings {
   String get copiedToClipboard =>
       _t('Copié dans le presse-papiers', 'Copied to clipboard',
           mg: 'Vo adika ao amin\'ny clipboard');
+  // Degany's rich answers (charts, tables, cards, forms)
+  String richSavedIn(String path) =>
+      _t('Enregistré : $path', 'Saved: $path', mg: 'Voatahiry : $path');
+  String get richOpen => _t('Ouvrir', 'Open', mg: 'Sokafy');
+  String get richMore => _t('Plus', 'More', mg: 'Hafa');
+  String get richSaveImage =>
+      _t('Enregistrer en image', 'Save as image', mg: 'Tahirizo ho sary');
+  String get richShare => _t('Partager', 'Share', mg: 'Zarao');
+  String get richCopyData =>
+      _t('Copier les données', 'Copy the data', mg: 'Adikao ny angona');
+  String get richBusy =>
+      _t('Degany travaille encore…', 'Degany is still working…',
+          mg: 'Mbola miasa i Degany…');
+  String get richPlaces => _t('Lieux', 'Places', mg: 'Toerana');
+  String get richOpenMap => _t('Carte', 'Map', mg: 'Sarintany');
+  String get richLoading => _t('Chargement…', 'Loading…', mg: 'Mameno…');
+  String get richNoPreview =>
+      _t('Aperçu indisponible', 'No preview', mg: 'Tsy misy topimaso');
+  String get richImageUnavailable =>
+      _t('Image introuvable', 'Image not found', mg: 'Tsy hita ny sary');
+  String get richPreparing =>
+      _t('Préparation…', 'Preparing…', mg: 'Am-panomanana…');
+  String get richTask => _t('Tâche', 'Task', mg: 'Asa');
+  String get richTaskNotFound =>
+      _t('Tâche introuvable', 'Task not found', mg: 'Tsy hita ny asa');
+  String get richLedger => _t('Comptabilité', 'Accounting', mg: 'Kaonty');
+  String richOperations(int n) =>
+      _t('$n opération(s)', '$n operation(s)', mg: 'Asa $n');
+  String get richNet => _t('Solde', 'Net', mg: 'Sisa');
+  String richMoreItems(int n) =>
+      _t('+ $n autre(s)', '+ $n more', mg: '+ $n hafa');
+  String get richFees =>
+      _t('Comparatif des frais', 'Fee comparison', mg: 'Fampitahana sarany');
+  String get richCheapest => _t('Moins cher', 'Cheapest', mg: 'Mora indrindra');
+  String get richShowValues =>
+      _t('Afficher les valeurs', 'Show values', mg: 'Asehoy ny sanda');
+  String get richHideValues =>
+      _t('Masquer les valeurs', 'Hide values', mg: 'Afeno ny sanda');
+  String get richTableName =>
+      _t('Tableau Degany', 'Degany table', mg: 'Tabilao Degany');
+  String richRows(int n) => _t('$n ligne(s)', '$n row(s)', mg: 'Andalana $n');
+  String get richShowAll =>
+      _t('Tout afficher', 'Show all', mg: 'Asehoy daholo');
+  String get richShowLess => _t('Réduire', 'Show less', mg: 'Ahenoy');
+  String get richCopyMarkdown =>
+      _t('Copier (Markdown)', 'Copy (Markdown)', mg: 'Adikao (Markdown)');
+  String get richCopyText =>
+      _t('Copier le texte', 'Copy as text', mg: 'Adikao ho lahatsoratra');
+  String get richCopyForSheet =>
+      _t('Copier pour un tableur', 'Copy for a spreadsheet',
+          mg: 'Adikao ho an\'ny tabilao');
+  String get richSaveTable =>
+      _t('Enregistrer en tableau', 'Save as table', mg: 'Tahirizo ho tabilao');
+  String get richSaveCsv =>
+      _t('Enregistrer en CSV', 'Save as CSV', mg: 'Tahirizo ho CSV');
+  String get richSaveNote =>
+      _t('Enregistrer en note', 'Save as note', mg: 'Tahirizo ho naoty');
+  String get richConfirm => _t('Valider', 'Confirm', mg: 'Ekena');
+  String get richSubmit => _t('Envoyer', 'Send', mg: 'Alefaso');
+  String get richYes => _t('Oui', 'Yes', mg: 'Eny');
+  String get richNo => _t('Non', 'No', mg: 'Tsia');
+  String get richRequired =>
+      _t('Obligatoire', 'Required', mg: 'Tsy maintsy fenoina');
+  String get richPickDate =>
+      _t('Choisir une date', 'Pick a date', mg: 'Misafidiana daty');
+
   String copiedWithFiles(int n) => _t(
         'Texte et $n fichier(s) copiés',
         'Text and $n file(s) copied',
@@ -1401,9 +1469,10 @@ class AppStrings {
   String get menu => _t('Menu', 'Menu', mg: 'Menio');
   String get accounting => _t('Comptabilité', 'Accounting', mg: 'Kaonty');
   String get tasks => _t('Tâches', 'Tasks', mg: 'Andraikitra');
-  String get editMode => _t('Mode édition', 'Edit mode', mg: 'Fomba fanovana');
-  String get normalMode =>
-      _t('Mode normal', 'Normal mode', mg: 'Fomba mahazatra');
+  String get moreActions => _t('Actions', 'Actions', mg: 'Asa');
+  String get deleteTransactionQuestion =>
+      _t('Supprimer cette opération ?', 'Delete this transaction?',
+          mg: 'Fafana ve ity fihetsika ity?');
   String get availableBalance =>
       _t('Solde disponible', 'Available balance', mg: 'Sola misy');
   String get credit => _t('Crédit', 'Credit', mg: 'Fidirana');
@@ -1483,6 +1552,10 @@ class AppStrings {
   String get noTasks => _t('Aucune tâche pour le moment', 'No tasks yet',
       mg: 'Tsy mbola misy andraikitra');
   String get taskTitle => _t('Titre', 'Title', mg: 'Lohateny');
+  String get editTask =>
+      _t('Modifier la tâche', 'Edit task', mg: 'Ovay ny andraikitra');
+  String get emptyTask => _t('Cette tâche est vide.', 'This task is empty.',
+      mg: 'Foana ity andraikitra ity.');
   String get untitledTask => _t('Tâche sans titre', 'Untitled task',
       mg: 'Andraikitra tsy misy anarana');
   String get addTextBlock =>

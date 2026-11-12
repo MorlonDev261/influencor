@@ -10,7 +10,7 @@ remplir et **ce qui bloque** si on la saute.
 |---|---|
 | Identifiant de l'app | `com.influencor.app` |
 | Fichier à envoyer | `dist/latest/android/Influencor.aab` |
-| Clé d'upload | `android/app/influencor-release.jks` (via `android/key.properties`, jamais commités) |
+| Clé de signature (envoi et Play) | `android/app/influencor-release.jks` (via `android/key.properties`, jamais commités), la même que les APK du site — voir G |
 | Politique de confidentialité | <https://influencor.mi-kandra.org/confidentialite/> |
 | Suppression des données | <https://influencor.mi-kandra.org/confidentialite/#suppression> |
 | Contact | support@poma-original.com |
@@ -64,7 +64,10 @@ Cocher les déclarations (règles du programme, lois d'export) puis **Créer**.
 
 Sur le PC Windows, à la racine du dépôt `influencor` :
 
-1. Vérifier que `pubspec.yaml` contient `version: 1.0.0+1`.
+1. Vérifier que `pubspec.yaml` contient `version: 1.0.0+2`. Les APK déjà
+   distribués par le site sont en `+1` : Play ne propose la mise à jour à ces
+   téléphones que si le numéro de build est supérieur (et la clé identique,
+   étape G).
 2. Vérifier la qualité :
 
    ```bash
@@ -85,8 +88,8 @@ Sur le PC Windows, à la racine du dépôt `influencor` :
    site : à retirer quand on veut aussi mettre à jour les téléchargements.
 
 4. Le fichier à envoyer est `dist/latest/android/Influencor.aab`. Il
-   est signé avec la clé d'upload (le build échoue volontairement si
-   `android/key.properties` manque).
+   est signé avec `influencor-release.jks`, la même clé que les APK du site
+   (le build échoue volontairement si `android/key.properties` manque).
 
 > Si `flutter build appbundle` affiche « failed to strip debug symbols » :
 > installer **Android SDK Command-line Tools** (voir [Builds](../build/builds.md#android-aab)).
@@ -98,10 +101,15 @@ Sur le PC Windows, à la racine du dépôt `influencor` :
 | Nom | 30 caractères | Influencor |
 | Description courte | 80 caractères | ex. « Vos notes, photos et vidéos rangées, prêtes à publier, avec l'assistant IA Degany. » |
 | Description complète | 4 000 caractères | Reprendre le site vitrine : bibliothèque, recherche, partage, nettoyage Deganeo, Degany, espace revendeur. |
-| Icône | 512 × 512 PNG, 32 bits | `assets/icon/icon_blue.png` redimensionnée |
-| Image de présentation | 1024 × 500 PNG/JPEG | **Obligatoire** : bannière bleue avec logo et slogan |
-| Captures téléphone | 2 à 8, côté 320–3840 px, ratio 9:16 | Accueil, bibliothèque, note, Degany, nettoyage, réglages |
-| Captures tablette 7" et 10" | facultatif | Recommandé : l'app a une mise en page tablette |
+| Icône | 512 × 512 PNG, 32 bits | [`play-store/icone-512.png`](play-store/icone-512.png) |
+| Image de présentation | 1024 × 500 PNG/JPEG | **Obligatoire** : [`play-store/presentation-1024x500.png`](play-store/presentation-1024x500.png) |
+| Captures téléphone | 2 à 8, côté 320–3840 px, ratio 9:16 | `play-store/mobile/` (8 images, dans l'ordre) |
+| Captures tablette 7" et 10" | facultatif | `play-store/tablette-7/`, `play-store/tablette-10/` |
+| Chromebook / Android XR | facultatif | `play-store/ordinateur/`, `play-store/android-xr/` |
+
+Les visuels de [`play-store/`](play-store/) sont générés à partir des vrais
+écrans de l'app : la procédure pour les refaire est dans
+[`play-store/CREDITS.md`](play-store/CREDITS.md).
 
 Puis **Paramètres de la fiche** : catégorie **Productivité**, adresse e-mail de
 contact support@poma-original.com, site web
@@ -118,15 +126,19 @@ Chaque rubrique doit être au statut « Terminé » avant toute publication.
 URL : <https://influencor.mi-kandra.org/confidentialite/>
 
 ### F2. Accès à l'application
-« Tout ou partie des fonctionnalités sont soumises à des restrictions » →
-ajouter des instructions :
+**L'AAB Play ne contient pas l'espace revendeur** (décision du 08/11/2026) : il
+est construit avec `--dart-define=INFLUENCOR_RESELLER=false`
+(`tools/build_full_release.ps1`), ce qui retire l'entrée « Accès
+professionnel », l'accueil revendeur, les liens `reseller.poma-original.com`
+(alias `.ResellerLinks` désactivé dans le manifeste) et les notifications
+revendeur. Seul l'APK du site le garde.
 
-- Nom : Espace revendeur
-- Identifiant / mot de passe : ceux du compte de démonstration (étape A)
-- Instructions : « Menu → Réglages → Influencor (en bas) → Accès
-  professionnel → Se connecter. Le reste de l'app ne demande aucun compte.
-  Degany (assistant IA) demande la clé API de l'utilisateur ; il est
-  facultatif. »
+Réponse : « Toutes les fonctionnalités sont disponibles sans restriction ».
+Degany demande la clé API de l'utilisateur ; il est facultatif (à préciser si
+la console le demande).
+
+> Un téléphone qui a l'APK du site et reçoit la mise à jour Play perd l'espace
+> revendeur (même identifiant d'app, build plus élevé).
 
 ### F3. Annonces
 « Non, mon application ne contient pas d'annonces. »
@@ -149,15 +161,18 @@ Questionnaire à remplir ainsi (cohérent avec la politique de confidentialité)
 |---|---|
 | L'app collecte-t-elle ou partage-t-elle des données ? | Oui |
 | Données chiffrées en transit ? | Oui |
-| Moyen de demander la suppression ? | Oui → URL de suppression du tableau du haut |
+| Création de compte | Mon appli ne permet pas aux utilisateurs de créer un compte |
 
-Types de données à déclarer comme **collectés** (aucun comme « partagé ») :
+Version Play (sans espace revendeur, voir F2) : un seul type de données, déclaré
+comme **collecté** (pas « partagé ») :
 
-| Type | Facultatif ? | Finalité | Pourquoi |
-|---|---|---|---|
-| Infos personnelles → Nom, Adresse e-mail, Numéro de téléphone | Oui | Gestion du compte, Fonctionnalité | Compte revendeur créé et utilisé dans le WebView |
-| Identifiants de l'appareil ou autres | Oui | Fonctionnalité | Jeton de notification Firebase envoyé au serveur Pôma |
-| Messages / Autres contenus générés par l'utilisateur | Oui | Fonctionnalité | Demandes envoyées au fournisseur d'IA choisi (Degany), traitées à la volée |
+| Type | Facultatif ? | Éphémère ? | Finalité | Pourquoi |
+|---|---|---|---|---|
+| Activité dans les applis → Autre contenu généré par l'utilisateur | Oui | Oui | Fonctionnement de l'appli | Demandes envoyées au fournisseur d'IA choisi (Degany), traitées à la volée |
+
+Le nom, l'e-mail, le téléphone (compte revendeur) et le jeton de notification
+(push revendeur) ne concernent que l'APK du site : **ne pas** les déclarer tant
+que la version Play n'a pas l'espace revendeur.
 
 Les fichiers de la bibliothèque, les tâches et la comptabilité restent sur
 l'appareil : **ne pas** les déclarer.
@@ -179,15 +194,32 @@ catégorie et vidéo à fournir : [android-storage-permission.md](../android-sto
 
 ## G. Signature d'application par Google Play
 
-Au premier envoi, accepter **Play App Signing** : Google conserve la clé de
-signature finale, `influencor-release.jks` ne sert plus qu'à envoyer les AAB.
+**Décision (30/10/2026) : la clé de signature de l'application est
+`android/app/influencor-release.jks`, la même que celle des APK du site.**
+Android n'accepte une mise à jour que si elle est signée avec la même clé que
+l'app installée : avec une clé générée par Google, les téléphones qui ont
+installé l'APK ne pourraient jamais passer par Play (il faudrait désinstaller).
+Avec la même clé et un numéro de build supérieur (`+2`, étape D), Play propose
+simplement la mise à jour.
+
+Ce choix se fait **au premier envoi de l'AAB et ne se change plus ensuite** :
+
+1. Quand la console propose Play App Signing, **ne pas accepter la clé générée
+   par Google** : choisir **Utiliser une autre clé → Exporter et importer une
+   clé depuis un keystore Java**.
+2. Télécharger l'outil `pepk.jar` et la clé de chiffrement fournie par la
+   console, lancer la commande indiquée avec `android/app/influencor-release.jks`
+   et son alias (voir `android/key.properties`), puis importer le `.zip` produit.
+3. Sauvegarder le keystore et ses mots de passe dans au moins deux coffres :
+   c'est désormais la clé de l'app (perte = plus aucune mise à jour hors Play,
+   fuite = fausse version publiable).
 
 Ensuite, Test et publication → Configuration → **Intégrité de l'application** →
-Signature d'application : copier l'empreinte **SHA-256 de la clé de signature
-d'application** et l'ajouter dans
+Signature d'application : vérifier que l'empreinte **SHA-256 de la clé de
+signature d'application** est celle déjà présente dans
 `https://reseller.poma-original.com/.well-known/assetlinks.json` (dépôt
-`poma-original`, `docs/03-mobile/deep-links.md`), à côté de celle de la clé
-d'upload.
+`poma-original`, `docs/03-mobile/deep-links.md`). Si elle diffère (clé Google
+acceptée par erreur), l'y ajouter.
 
 > Sinon : les liens revendeur ne s'ouvrent plus dans l'app installée depuis Play.
 
@@ -195,7 +227,9 @@ d'upload.
 
 1. Test et publication → Tests → **Test fermé** → Gérer la piste → Créer une
    release.
-2. Déposer `Influencor.aab`, nom de release `1.0.0 (1)`, notes de
+2. Déposer `Influencor.aab` (premier envoi : choisir la clé comme décrit en
+   **G**, **pas** l'option par défaut « clé générée par Google »), nom de
+   release `1.0.0 (2)`, notes de
    version en français.
 3. Onglet **Testeurs** → créer une liste avec au moins **12 adresses Gmail** →
    copier le **lien d'inscription** et l'envoyer aux testeurs.
@@ -212,7 +246,11 @@ Checklist de test sur téléphone :
 - [ ] Degany avec une clé API ;
 - [ ] connexion revendeur, ouverture d'un lien `reseller.poma-original.com`
       depuis WhatsApp, notification ;
-- [ ] écran À propos → Politique de confidentialité.
+- [ ] écran À propos → Politique de confidentialité ;
+- [ ] mise à jour depuis l'APK : sur un téléphone où l'APK du site (`+1`) est
+      installé, ouvrir la page Play de l'app. Play doit proposer **Mettre à
+      jour** (pas « Installer ») et les données de l'app restent. Si Play
+      refuse, la clé de signature n'est pas la bonne (section G).
 
 ## I. Demander l'accès à la production
 
@@ -246,7 +284,7 @@ disparaît (`./start.sh --play-store off` pour revenir en arrière).
 
 1. Corriger, puis `flutter analyze` et `flutter test`.
 2. Play refuse tout AAB dont le numéro de build (le nombre après `+` dans
-   `pubspec.yaml`, aujourd'hui `1`) n'est pas **supérieur** au précédent : il
+   `pubspec.yaml`, aujourd'hui `2`) n'est pas **supérieur** au précédent : il
    faut donc le changer avant chaque nouvel envoi.
 3. Reconstruire (étape D), puis Production → Créer une release → déposer l'AAB
    → déploiement progressif.

@@ -44,10 +44,16 @@ class _IndexScreenState extends ConsumerState<IndexScreen> {
 
   Future<void> _refresh() => ref.refresh(dirRecursiveProvider(dir).future);
 
-  /// Where [e] lives, relative to [dir] ("" when right here).
+  /// Where [e] lives, relative to [dir] ("" when right here). A note's
+  /// hidden `.attachments` folder reads as "Attachments".
   String _location(LibraryEntry e) {
     final rel = p.relative(p.dirname(e.path), from: dir);
-    return rel == '.' ? '' : p.split(rel).join(' / ');
+    if (rel == '.') return '';
+    final attachments = ref.read(appStringsProvider).attachments;
+    return [
+      for (final part in p.split(rel))
+        part == '.attachments' ? attachments : part,
+    ].join(' / ');
   }
 
   @override

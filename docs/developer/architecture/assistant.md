@@ -21,7 +21,8 @@ l'app), renvoie les résultats, et boucle jusqu'à la réponse finale.
 | [tools/](../../../lib/features/assistant/application/tools/) | Les outils : bibliothèque, Deganeo, tâches/compta/frais, app. |
 | [assistant_providers.dart](../../../lib/features/assistant/application/assistant_providers.dart) | Boucle agent, prompt système, état du chat. |
 | [assistant_chat.dart](../../../lib/features/assistant/presentation/assistant_chat.dart) | Page du chat : liste, défilement qui suit le streaming, saisie, confirmations. |
-| [assistant_transcript.dart](../../../lib/features/assistant/presentation/assistant_transcript.dart) | Rendu façon agent de code : texte pleine largeur avec curseur, bloc de réflexion, actions `● Outil(args)` / `⎿ résultat`, `ToolGroup` (une suite d'au moins deux actions, avec la réflexion entre elles, repliée en « ● N actions · durée » une fois terminée ; `_entries()` de `assistant_chat.dart` fait les regroupements), Markdown léger, liens `[[chemin]]`. |
+| [assistant_transcript.dart](../../../lib/features/assistant/presentation/assistant_transcript.dart) | Rendu façon agent de code : texte pleine largeur avec curseur, bloc de réflexion, actions `● Outil(args)` / `⎿ résultat`, `ToolGroup` (une suite d'au moins deux actions, avec la réflexion entre elles, repliée en « ● N actions · durée » une fois terminée ; `_entries()` de `assistant_chat.dart` fait les regroupements), cartes de question (choix multiple) et de formulaire (`FormCard`), barre copier / note / partager sous chaque réponse. Le texte passe par `RichMessage` (dossier `rich/`, ci-dessous). |
+| [rich/](../../../lib/features/assistant/presentation/rich/) | Affichage riche des réponses : `markdown_blocks.dart` (analyse Markdown en blocs, pur Dart), `rich_message.dart` (rendu, tableaux exportables, code, `PathChip`, aiguillage des blocs), `chart_block.dart`, `data_blocks.dart`, `app_blocks.dart`, `diagram_block.dart`, `math_view.dart`, `syntax_highlight.dart`, `rich_common.dart` (formats, palette, export). |
 | [assistant_settings_screen.dart](../../../lib/features/assistant/presentation/assistant_settings_screen.dart) | Réglages : fournisseur, clé, modèle, URL, bouton Enregistrer (en plus de l'enregistrement automatique pendant la saisie), test. Masqués quand le build fixe le modèle. |
 | [assistant_history_screen.dart](../../../lib/features/assistant/presentation/assistant_history_screen.dart) | Conversations précédentes (bouton ⟲ à droite de « Nouvelle conversation ») : rouvrir, supprimer. |
 
@@ -91,13 +92,46 @@ conversation).
 | Tâches | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task` |
 | Comptabilité | `list_transactions`, `accounting_summary`, `add_transaction`, `update_transaction`, `delete_transaction` |
 | Frais mobile money | `mobile_money_fees`, `list_fee_tariffs` |
-| Conversation | `ask_user` : question avec choix en boutons, attend la réponse (bouton ou texte tapé) |
+| Conversation | `ask_user` : question avec choix en boutons (`multiple` : plusieurs choix, réponse `answers`), attend la réponse (bouton ou texte tapé) ; `ask_form` : formulaire (text, multiline, number, date, choice, multichoice, bool), réponse `values` |
 | Mémoire | `update_user_profile` : ajoute / corrige / retire des faits sur l'utilisateur (outil silencieux, voir ci-dessous) |
 | App | `open_item`, `open_screen`, `get_settings`, `update_settings`, `copy_to_clipboard`, `share`, `fetch_web_page` |
 
 Ajouter un outil : créer un `AgentTool` dans le fichier du domaine et
 l'ajouter à `agentToolsProvider`. Un outil qui détruit ou remplace des données
 renseigne `confirm` (la question affichée à l'utilisateur).
+
+## Affichage riche
+
+Le modèle écrit du Markdown ; `RichMessage` le découpe en blocs
+(`parseMarkdown`) : paragraphes (gras, italique, barré, `code`,
+`[texte](url)`, `[[chemin]]`, URL, formules `$…$` / `\(…\)`), titres,
+séparateurs, listes numérotées / imbriquées / à cocher, citations, tableaux
+(`| a | b |`), blocs de code colorés, formules `$$…$$`. Un bloc ```` ```nom ````
+dont le nom est connu devient un widget ; son contenu est du JSON
+(`decodeBlockJson` tolère les virgules finales). Le format de chaque bloc est
+décrit au modèle dans `_displayGuide` (prompt système).
+
+| Bloc | Widget | Source des données |
+| --- | --- | --- |
+| `chart` (line, bar, hbar, area, pie, donut, scatter, sparkline ; `stacked`) | `ChartBlock` (CustomPainter, info-bulle, légende, menu image / partage / données) | le modèle |
+| `kpi`, `progress` (barre ou `gauge`), `callout` / `info` / `warning`…, `list`, `timeline`, `map` | `data_blocks.dart` | le modèle |
+| `actions`, `suggestions` | boutons qui appellent `send()` (désactivés pendant le travail) | le modèle |
+| `mermaid` (`graph`/`flowchart`), `diagram` (JSON) | `DiagramBlock` (couches par plus long chemin) | le modèle |
+| `table` (JSON), `csv`, `tsv` | `MarkdownTable` | le modèle |
+| `math` | `MathBlock` (sous-ensemble LaTeX : fractions, racines, indices, symboles) | le modèle |
+| `task` (`id`) | `TaskCardBlock` : cases cochables, enregistrées par `TaskStore` | l'app |
+| `ledger` (from, to, account, type, sheet, limit) | `LedgerBlock` + `LedgerChartCard` | l'app (`ledgerProvider`) |
+| `fees` | `FeesBlock` (option la moins chère en évidence) | résultats des outils de frais |
+| `gallery`, `preview` (`path`) | `ChatImageGallery` ; début de note, lignes de tableau (formules calculées, colonnes `[masquées]` cachées), image, dossier | l'app, dossier de travail seulement (`resolveWorkspacePath`) |
+| image Markdown `![légende](chemin ou https)` | `MarkdownImages` → `ChatImageGallery` (`chat_image.dart`) : une image entière à sa forme (`maxHeight`), deux côte à côte, grille au-delà (`+N` après 12) ; décodage à la taille affichée (`cacheWidth`), fondu, tuile pour HEIC / vidéo / introuvable ; un appui ouvre `/preview` avec toutes les images (`extra`) | le modèle ; fichiers du dossier de travail seulement, ou URL http(s) |
+| `meta` | `MetaBlock` (`MetaTable` de Deganeo, valeurs masquées par défaut) | le modèle (résultat de `deganeo_inspect`) |
+
+Pendant le streaming, un bloc riche encore ouvert affiche « Préparation… » ;
+un bloc fermé illisible retombe en bloc de code. Les exports (note, tableau
+Influencor, CSV avec BOM, PNG du graphique) vont dans `Degany/` à la racine du
+dossier de travail (`saveExportFile`, `deganyExportDir`) puis rafraîchissent
+la bibliothèque. Pas de tuiles de carte : `map` ouvre OpenStreetMap à
+l'extérieur.
 
 ## Mémoire (profil de l'utilisateur)
 
@@ -226,5 +260,9 @@ renvoyées par un fournisseur sont affichées telles quelles.
 ## Tests
 
 [assistant_agent_test.dart](../../../test/assistant_agent_test.dart) : boucle
-avec un faux modèle, confirmations, chemins interdits, tâches/compta, et
-format des requêtes Claude / OpenAI / Gemini (`MockClient`).
+avec un faux modèle, confirmations, chemins interdits, tâches/compta, `ask_user`
+à choix multiple, `ask_form`, et format des requêtes Claude / OpenAI / Gemini
+(`MockClient`).
+[assistant_rich_test.dart](../../../test/assistant_rich_test.dart) : analyse
+Markdown, nombres, graphiques, Mermaid, rendu de chaque bloc, boutons
+d'action, choix multiple et formulaire.

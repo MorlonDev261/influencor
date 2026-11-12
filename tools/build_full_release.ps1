@@ -64,7 +64,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "APK (split) build failed" }
   flutter build apk --release @defines
   if ($LASTEXITCODE -ne 0) { throw "APK (universal) build failed" }
-  flutter build appbundle --release @defines
+  # Google Play build: without the Pôma reseller space (AppConstants.resellerEnabled).
+  flutter build appbundle --release @defines --dart-define=INFLUENCOR_RESELLER=false
   if ($LASTEXITCODE -ne 0) { throw "AAB build failed" }
 
   if (-not $SkipWeb) {
