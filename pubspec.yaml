@@ -2,6 +2,9 @@ name: influencor
 description: "Influencor — a personal content library for social media managers and creators."
 publish_to: "none"
 version: 1.0.0+3
+# Version des APK du site (/download), distincte de `version` (AAB Play Store,
+# Windows). Lue par tools/apk_version.ps1 et par influencor-web (sync-downloads).
+apk_version: 0.5.0+2
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

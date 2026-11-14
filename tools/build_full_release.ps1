@@ -11,6 +11,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $jbr = Join-Path $env:USERPROFILE '.jdks\jbr-21.0.11'
 $singleExeBuilder = Join-Path $PSScriptRoot 'make_windows_single_exe.ps1'
 $collector = Join-Path $PSScriptRoot 'collect_release_artifacts.ps1'
+. (Join-Path $PSScriptRoot 'apk_version.ps1')
 
 if (Test-Path $jbr) {
   $env:JAVA_HOME = $jbr
@@ -60,9 +61,11 @@ try {
   }
 
   # Android: one APK per ABI, a universal APK, and the Play Store bundle.
-  flutter build apk --release --split-per-abi @defines
+  # APK du site : `apk_version` de pubspec.yaml ; l'AAB garde `version`.
+  $apkArgs = Get-ApkBuildArgs $repo
+  flutter build apk --release --split-per-abi @defines @apkArgs
   if ($LASTEXITCODE -ne 0) { throw "APK (split) build failed" }
-  flutter build apk --release @defines
+  flutter build apk --release @defines @apkArgs
   if ($LASTEXITCODE -ne 0) { throw "APK (universal) build failed" }
   # Google Play build: without the Pôma reseller space (AppConstants.resellerEnabled).
   flutter build appbundle --release @defines --dart-define=INFLUENCOR_RESELLER=false

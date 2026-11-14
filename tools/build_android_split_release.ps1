@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $jbr = Join-Path $env:USERPROFILE '.jdks\jbr-21.0.11'
 $collector = Join-Path $PSScriptRoot 'collect_release_artifacts.ps1'
+. (Join-Path $PSScriptRoot 'apk_version.ps1')
 
 if (Test-Path $jbr) {
   $env:JAVA_HOME = $jbr
@@ -15,8 +16,15 @@ if (Test-Path (Join-Path $repo '.env')) { $defines = @('--dart-define-from-file=
 
 Push-Location $repo
 try {
-  flutter build apk --release --split-per-abi @defines
-  powershell -NoProfile -ExecutionPolicy Bypass -File $collector
+  $apkArgs = Get-ApkBuildArgs $repo
+  flutter build apk --release --split-per-abi @defines @apkArgs
+  if ($LASTEXITCODE -ne 0) { throw "APK build failed" }
+  $label = Get-ApkVersionLabel $repo
+  if ($label) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File $collector -SkipWeb -Version $label
+  } else {
+    powershell -NoProfile -ExecutionPolicy Bypass -File $collector
+  }
 } finally {
   Pop-Location
 }

@@ -1,7 +1,10 @@
 param(
   # Leave web out: an old build/web would otherwise be filed under this
   # version.
-  [switch]$SkipWeb
+  [switch]$SkipWeb,
+  # Version label of the release folder (e.g. 0.5.0_2), instead of pubspec's
+  # `version`: set by the APK-only build scripts from `apk_version`.
+  [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,7 +62,7 @@ function Copy-DirectoryIfExists([string]$Source, [string]$Destination) {
   Write-Host "Copied: $Destination"
 }
 
-$version = Get-AppVersion
+$version = if ($Version) { $Version } else { Get-AppVersion }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $releaseName = "v$version-$stamp"
 $releaseDir = Join-Path $releases $releaseName
