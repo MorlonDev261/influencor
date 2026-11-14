@@ -53,17 +53,20 @@ class _FakePaths extends PathProviderPlatform with MockPlatformInterfaceMixin {
 
 Future<void> _loadFonts() async {
   final where = await Process.run('where', ['flutter'], runInShell: true);
-  final flutterBin = where.stdout.toString().split(RegExp(r'\r?\n')).first.trim();
+  final flutterBin =
+      where.stdout.toString().split(RegExp(r'\r?\n')).first.trim();
   final fonts = p.join(p.dirname(p.dirname(flutterBin)), 'bin', 'cache',
       'artifacts', 'material_fonts');
-  final windowsFonts = p.join(Platform.environment['WINDIR'] ?? r'C:\Windows', 'Fonts');
+  final windowsFonts =
+      p.join(Platform.environment['WINDIR'] ?? r'C:\Windows', 'Fonts');
 
   Future<void> family(String name, List<String> files) async {
     final loader = FontLoader(name);
     for (final f in files) {
       final file = File(p.isAbsolute(f) ? f : p.join(fonts, f));
       if (!file.existsSync()) continue;
-      loader.addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));
+      loader
+          .addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));
     }
     await loader.load();
   }
@@ -92,7 +95,8 @@ Future<void> _loadFonts() async {
   final ttc = File(p.join(windowsFonts, 'cambria.ttc'));
   if (ttc.existsSync()) {
     final loader = FontLoader('Cambria Math')
-      ..addFont(Future.value(ByteData.sublistView(_ttcFace(ttc.readAsBytesSync(), 1))));
+      ..addFont(Future.value(
+          ByteData.sublistView(_ttcFace(ttc.readAsBytesSync(), 1))));
     await loader.load();
   }
 }
@@ -106,7 +110,12 @@ Uint8List _ttcFace(Uint8List ttc, int index) {
   final records = <(int, int, int, int)>[]; // tag, checksum, offset, length
   for (var i = 0; i < numTables; i++) {
     final r = dir + 12 + 16 * i;
-    records.add((d.getUint32(r), d.getUint32(r + 4), d.getUint32(r + 8), d.getUint32(r + 12)));
+    records.add((
+      d.getUint32(r),
+      d.getUint32(r + 4),
+      d.getUint32(r + 8),
+      d.getUint32(r + 12)
+    ));
   }
   var size = header;
   for (final r in records) {
@@ -135,7 +144,8 @@ Uint8List _ttcFace(Uint8List ttc, int index) {
 /// Lets real file IO and image decoding finish between frames.
 Future<void> settle(WidgetTester tester, {int rounds = 14}) async {
   for (var i = 0; i < rounds; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
     await tester.pump(const Duration(milliseconds: 200));
   }
 }
@@ -166,14 +176,16 @@ Future<void> waitLoaded(WidgetTester tester, {int seconds = 60}) async {
   print('  (still loading after ${seconds}s)');
 }
 
-Future<void> shoot(WidgetTester tester, GlobalKey key, File file, double dpr) async {
+Future<void> shoot(
+    WidgetTester tester, GlobalKey key, File file, double dpr) async {
   await waitLoaded(tester);
   for (var i = 0; i < 3; i++) {
     await precacheAll(tester);
     await settle(tester, rounds: 5);
   }
   await tester.runAsync(() async {
-    final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final boundary =
+        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await boundary.toImage(pixelRatio: dpr);
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
     file.parent.createSync(recursive: true);
@@ -213,7 +225,8 @@ void main() {
     PathProviderPlatform.instance = _FakePaths(base.path);
     demo = await DemoWorkspace.create(base.path,
         photosDir: p.join(repo, 'build', 'store_shots', 'photos'),
-        phoneDir: p.join(repo, 'build', 'store_shots', 'phone', 'Pôma Original'));
+        phoneDir:
+            p.join(repo, 'build', 'store_shots', 'phone', 'Pôma Original'));
   });
 
   final onlyDevices = _envList('STORE_DEVICES');
@@ -221,14 +234,16 @@ void main() {
 
   for (final device in devices) {
     if (onlyDevices.isNotEmpty && !onlyDevices.contains(device.name)) continue;
-    testWidgets('store shots ${device.name}', timeout: const Timeout(Duration(minutes: 40)), (tester) async {
+    testWidgets('store shots ${device.name}',
+        timeout: const Timeout(Duration(minutes: 40)), (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       // Real shadows (the test default draws them as black outlines).
       debugDisableShadows = false;
       tester.view.physicalSize = device.size * device.dpr;
       tester.view.devicePixelRatio = device.dpr;
       addTearDown(tester.view.reset);
-      FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTouch;
+      FocusManager.instance.highlightStrategy =
+          FocusHighlightStrategy.alwaysTouch;
       // Plugins without a test implementation (deep links, push…): ignored.
       final onError = FlutterError.onError;
       FlutterError.onError = (details) {
@@ -265,7 +280,8 @@ void main() {
         '8-dossier': ('/browse?path=${q(DemoWorkspace.featuredFolder)}', null),
       };
 
-      for (final MapEntry(key: name, value: (location, then)) in shots.entries) {
+      for (final MapEntry(key: name, value: (location, then))
+          in shots.entries) {
         if (onlyShots.isNotEmpty && !onlyShots.any(name.contains)) continue;
         router.go('/menu'); // leaves the previous screen (and its state)
         await settle(tester, rounds: 3);
@@ -277,7 +293,8 @@ void main() {
           await settle(tester, rounds: 40);
           await waitLoaded(tester);
         }
-        await shoot(tester, key, File(p.join(out.path, device.name, '$name.png')), device.dpr);
+        await shoot(tester, key,
+            File(p.join(out.path, device.name, '$name.png')), device.dpr);
       }
 
       FlutterError.onError = onError;

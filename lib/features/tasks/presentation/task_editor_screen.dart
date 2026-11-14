@@ -296,8 +296,8 @@ InputDecoration _editField(BuildContext context, String hint,
     {String? label, bool dense = false}) {
   final scheme = Theme.of(context).colorScheme;
   final radius = BorderRadius.circular(10);
-  final none = OutlineInputBorder(
-      borderRadius: radius, borderSide: BorderSide.none);
+  final none =
+      OutlineInputBorder(borderRadius: radius, borderSide: BorderSide.none);
   return InputDecoration(
     hintText: hint,
     labelText: label,

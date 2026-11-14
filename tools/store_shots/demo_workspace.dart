@@ -33,7 +33,8 @@ class DemoWorkspace {
   ];
 
   static const notes = <String, String>{
-    'Légende lancement collection.md': '''Elle est enfin là ! 🌺 Notre nouvelle collection Nosy Be sort ce vendredi à 18 h.
+    'Légende lancement collection.md':
+        '''Elle est enfin là ! 🌺 Notre nouvelle collection Nosy Be sort ce vendredi à 18 h.
 
 ✨ Tissus légers, cousus à Antananarivo
 🎨 6 couleurs inspirées des plages du Nord
@@ -102,11 +103,13 @@ class DemoWorkspace {
       featuredFolder = 'iPhone 15 Pro Max';
       final metaFile = File(ws.path('.clipboard/metadata.json'));
       final meta = metaFile.existsSync()
-          ? (jsonDecode(metaFile.readAsStringSync()) as Map).cast<String, dynamic>()
+          ? (jsonDecode(metaFile.readAsStringSync()) as Map)
+              .cast<String, dynamic>()
           : <String, dynamic>{};
       for (final f in phoneFavorites) {
         if (!File(ws.path(f)).existsSync()) continue;
-        final m = (meta[f] as Map?)?.cast<String, dynamic>() ?? {'tags': <String>[]};
+        final m =
+            (meta[f] as Map?)?.cast<String, dynamic>() ?? {'tags': <String>[]};
         meta[f] = {...m, 'favorite': true};
       }
       metaFile
@@ -125,8 +128,9 @@ class DemoWorkspace {
       Directory(ws.path(f)).createSync(recursive: true);
     }
     notes.forEach((name, body) => File(ws.path(name)).writeAsStringSync(body));
-    File(ws.path('Campagne Été 2026/Planning publications.md')).writeAsStringSync(
-        'Lundi : teaser\nMercredi : Reel coulisses\nVendredi : lancement');
+    File(ws.path('Campagne Été 2026/Planning publications.md'))
+        .writeAsStringSync(
+            'Lundi : teaser\nMercredi : Reel coulisses\nVendredi : lancement');
     File(ws.path('Recettes/Liste de courses.md'))
         .writeAsStringSync('- Brèdes mafana\n- Zébu\n- Gingembre\n- Riz');
 
@@ -171,19 +175,26 @@ class DemoWorkspace {
         {'id': 's1', 'start': start.toIso8601String()},
       ],
       'entries': [
-        entry(day(0, 9), 450000, 'mvola', 'sale', 'credit', 'Partenariat savons vanille'),
-        entry(day(1, 15), 85000, 'orangeMoney', 'expense', 'debit', 'Forfait internet'),
-        entry(day(2, 11), 320000, 'airtelMoney', 'sale', 'credit', 'Reel Hôtel Nosy Be'),
-        entry(day(3, 10), 120000, 'cash', 'purchase', 'debit', 'Tissus pour le shooting'),
-        entry(day(4, 16), 600000, 'orangeMoney', 'sale', 'credit', 'Campagne mode été'),
-        entry(day(5, 8), 45000, 'mvola', 'expense', 'debit', 'Transport Ambohimanga'),
+        entry(day(0, 9), 450000, 'mvola', 'sale', 'credit',
+            'Partenariat savons vanille'),
+        entry(day(1, 15), 85000, 'orangeMoney', 'expense', 'debit',
+            'Forfait internet'),
+        entry(day(2, 11), 320000, 'airtelMoney', 'sale', 'credit',
+            'Reel Hôtel Nosy Be'),
+        entry(day(3, 10), 120000, 'cash', 'purchase', 'debit',
+            'Tissus pour le shooting'),
+        entry(day(4, 16), 600000, 'orangeMoney', 'sale', 'credit',
+            'Campagne mode été'),
+        entry(day(5, 8), 45000, 'mvola', 'expense', 'debit',
+            'Transport Ambohimanga'),
         entry(day(6, 14), 180000, 'cash', 'sale', 'credit', 'Vente photos'),
       ],
     });
 
     // Tasks.
     var t = 0;
-    Map<String, Object> task(String title, List<(String, bool)> items, int hoursAgo) {
+    Map<String, Object> task(
+        String title, List<(String, bool)> items, int hoursAgo) {
       final id = 't${t++}';
       final at = now.subtract(Duration(hours: hoursAgo)).toIso8601String();
       return {
@@ -206,22 +217,31 @@ class DemoWorkspace {
     }
 
     for (final doc in [
-      task('Lancement collection Nosy Be', [
-        ('Shooting photo à la plage', true),
-        ('Écrire les légendes', true),
-        ('Monter le Reel coulisses', false),
-        ('Programmer la publication', false),
-      ], 2),
-      task('Partenariat savons vanille', [
-        ('Envoyer le devis', true),
-        ('Recevoir les produits', true),
-        ('Story déballage', false),
-      ], 20),
-      task('Vlog marché d\'Analakely', [
-        ('Préparer le script', true),
-        ('Tournage samedi matin', false),
-        ('Sous-titres FR / MG', false),
-      ], 50),
+      task(
+          'Lancement collection Nosy Be',
+          [
+            ('Shooting photo à la plage', true),
+            ('Écrire les légendes', true),
+            ('Monter le Reel coulisses', false),
+            ('Programmer la publication', false),
+          ],
+          2),
+      task(
+          'Partenariat savons vanille',
+          [
+            ('Envoyer le devis', true),
+            ('Recevoir les produits', true),
+            ('Story déballage', false),
+          ],
+          20),
+      task(
+          'Vlog marché d\'Analakely',
+          [
+            ('Préparer le script', true),
+            ('Tournage samedi matin', false),
+            ('Sous-titres FR / MG', false),
+          ],
+          50),
     ]) {
       json('.clipboard/tasks/${doc['id']}.json', doc);
     }
@@ -268,8 +288,9 @@ class DemoWorkspace {
         'items': [
           {
             'kind': 'user',
-            'text': 'Prépare une annonce courte pour l\'iPhone 15 Pro Max à partir '
-                'de son message, avec les prix, et mets-la en favori.',
+            'text':
+                'Prépare une annonce courte pour l\'iPhone 15 Pro Max à partir '
+                    'de son message, avec les prix, et mets-la en favori.',
           },
           {
             'kind': 'tool',
@@ -315,8 +336,9 @@ class DemoWorkspace {
       'items': [
         {
           'kind': 'user',
-          'text': 'Écris une légende Instagram pour ma photo de la plage de Nosy Be '
-              'et range-la dans « Campagne Été 2026 ».',
+          'text':
+              'Écris une légende Instagram pour ma photo de la plage de Nosy Be '
+                  'et range-la dans « Campagne Été 2026 ».',
         },
         {
           'kind': 'tool',

@@ -195,7 +195,8 @@ void main() {
       await tester.tap(find.text('Robe wax'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('ledger-dialog-edit')), findsOneWidget);
-      expect(find.byKey(const ValueKey('ledger-detail-amount')), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('ledger-detail-amount')), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
     });
 

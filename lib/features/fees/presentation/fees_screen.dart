@@ -136,8 +136,7 @@ class _FeesScreenState extends ConsumerState<FeesScreen> {
                 _group(s.feeOperator, operatorChips),
                 _group(s.feeOperation, kindButton),
                 if (targetButton != null) _group(s.feeTo, targetButton),
-                if (channelButton != null)
-                  _group(s.feeChannel, channelButton),
+                if (channelButton != null) _group(s.feeChannel, channelButton),
               ],
             ),
             if (estimated != null) estimated,
@@ -209,8 +208,8 @@ class _FeesScreenState extends ConsumerState<FeesScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(s.feeIncludeFeesHint,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant)),
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ),
           ],
           const SizedBox(height: 16),
