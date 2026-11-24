@@ -353,17 +353,20 @@ class LibraryRepository {
   }
 
   /// Stores a metadata-free copy of [sourcePath] (produced into [cleanedTemp])
-  /// in the library folder [dirPath], as `name_clean.ext`, never overwriting.
-  /// Returns the created path.
+  /// in the library folder [dirPath], as `name_clean.ext` (or `name.ext` with
+  /// [keepName]), never overwriting, and registers it in the gallery index so
+  /// other apps list it. Returns the created path.
   Future<String> storeCleanedIn(
     String dirPath,
     String sourcePath,
-    String cleanedTemp,
-  ) async {
+    String cleanedTemp, {
+    bool keepName = false,
+  }) async {
     await Directory(dirPath).create(recursive: true);
+    final suffix = keepName ? '' : '_clean';
     final target = await _claimFile(p.join(
       dirPath,
-      '${p.basenameWithoutExtension(sourcePath)}_clean'
+      '${p.basenameWithoutExtension(sourcePath)}$suffix'
       '${p.extension(cleanedTemp)}',
     ));
     try {
@@ -372,6 +375,7 @@ class LibraryRepository {
       await _dropClaim(target);
       rethrow;
     }
+    await StoragePermissionService().scanMedia([target]);
     return target;
   }
 

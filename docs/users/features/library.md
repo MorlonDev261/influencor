@@ -11,8 +11,7 @@ notes, images, vidéos, tableaux et fichiers reconnus.
 
 - créer un dossier;
 - créer une note;
-- importer des fichiers;
-- déplacer des fichiers dans la bibliothèque;
+- importer des fichiers, des photos de la galerie ou un dossier;
 - glisser-déposer des fichiers sur desktop;
 - trier les éléments;
 - filtrer par type;
@@ -34,16 +33,19 @@ Résultat attendu: un dossier apparaît dans la bibliothèque.
 
 1. Appuyez sur **Ajouter**.
 2. Choisissez **Importer des fichiers**.
-3. Sélectionnez les fichiers.
-4. Validez.
+3. Choisissez la source : **Galerie** (téléphone), **Fichiers** ou
+   **Un dossier**.
+4. Le sélecteur du système s'ouvre (galerie du téléphone, gestionnaire de
+   fichiers, fenêtre de l'ordinateur) : sélectionnez puis validez.
 
-Les fichiers acceptés sont copiés dans le dossier courant. Les fichiers non
-acceptés sont ignorés et signalés.
+Les éléments choisis sont copiés dans le dossier courant ; les originaux ne
+sont jamais modifiés ni supprimés. Les fichiers non acceptés sont ignorés et
+signalés.
 
-## Déplacer des fichiers dans l'app
-
-L'action **Déplacer des fichiers** importe les fichiers puis supprime les
-originaux si la copie a réussi.
+L'app ne parcourt pas elle-même le stockage du téléphone : hors de l'espace de
+travail, c'est toujours le sélecteur du système qui est utilisé. Dans l'espace
+de travail (déplacer un élément, joindre un fichier à Degany), l'app garde son
+propre navigateur, limité à ce dossier.
 
 ## Dossiers index (Pro)
 

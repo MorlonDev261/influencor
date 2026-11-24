@@ -163,4 +163,38 @@ void main() {
       isTrue,
     );
   });
+
+  group('storeCleanedIn (Deganeo folder for files from outside)', () {
+    late File source;
+    late File cleaned;
+    late String deganeo;
+
+    setUp(() {
+      source = File(p.join(outside.path, 'IMG_1.jpg'))..writeAsBytesSync([9]);
+      cleaned = File(p.join(outside.path, 'tmp_clean.jpg'))
+        ..writeAsBytesSync([1, 2]);
+      deganeo = p.join(workspace.path, 'Deganeo');
+    });
+
+    test('a copy is saved as name_clean in a created Deganeo folder', () async {
+      final out = await repo.storeCleanedIn(deganeo, source.path, cleaned.path);
+
+      expect(out, p.join(deganeo, 'IMG_1_clean.jpg'));
+      expect(await File(out).readAsBytes(), [1, 2]);
+      expect(await source.readAsBytes(), [9]); // original untouched
+    });
+
+    test('replace keeps the name and never overwrites', () async {
+      final first = await repo
+          .storeCleanedIn(deganeo, source.path, cleaned.path, keepName: true);
+      final second = await repo
+          .storeCleanedIn(deganeo, source.path, cleaned.path, keepName: true);
+
+      expect(first, p.join(deganeo, 'IMG_1.jpg'));
+      expect(second, isNot(first));
+      expect(p.dirname(second), deganeo);
+      expect(await File(first).exists(), isTrue);
+      expect(await source.readAsBytes(), [9]); // original untouched
+    });
+  });
 }

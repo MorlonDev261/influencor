@@ -1,10 +1,10 @@
 name: influencor
 description: "Influencor — a personal content library for social media managers and creators."
 publish_to: "none"
-version: 1.0.0+3
+version: 1.0.0+5
 # Version des APK du site (/download), distincte de `version` (AAB Play Store,
 # Windows). Lue par tools/apk_version.ps1 et par influencor-web (sync-downloads).
-apk_version: 0.5.0+2
+apk_version: 0.5.0+4
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -32,9 +32,10 @@ dependencies:
   crypto: ^3.0.6
 
   # File selection, drag & drop, sharing, media
-  # v11 (win32 <6) is required for compatibility with super_clipboard; only the
-  # web fallback in AppFilePicker uses it now (the in-app browser replaced it
-  # everywhere else).
+  # v11 (win32 <6) is required for compatibility with super_clipboard. It opens
+  # the system pickers (phone gallery, Files / Documents UI, desktop dialogs)
+  # for everything outside the workspace; the in-app browser only serves the
+  # workspace itself (see AppFilePicker).
   file_picker: ^11.0.3
   desktop_drop: ^0.8.4
   # Native share sheet (caption + attached images) from the note screen.
@@ -65,6 +66,8 @@ dependencies:
   firebase_messaging: ^16.7.0
   # AI assistant: calls the LLM provider the user configured (works on web too).
   http: ^1.6.0
+  # Build number for the minimum-version check (UpdateGate).
+  package_info_plus: ^9.0.1
   # Degany's API keys: Android Keystore, Apple Keychain, Windows DPAPI.
   flutter_secure_storage: ^10.3.4
 dev_dependencies:

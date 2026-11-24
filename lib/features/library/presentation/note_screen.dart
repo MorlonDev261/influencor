@@ -369,7 +369,9 @@ class _NoteScreenState extends ConsumerState<NoteScreen> {
         // skip failed attachment
       }
     }
-    if (newTags.isEmpty) return;
+    // attachImage copied them into the workspace: drop the picker's copies.
+    await AppFilePicker.releaseTemporaryFiles();
+    if (newTags.isEmpty || !mounted) return;
     setState(() => _imageTags.addAll(newTags));
     if (mounted) _snack(strings.photosAttached(newTags.length));
   }

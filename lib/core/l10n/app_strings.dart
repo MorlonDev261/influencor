@@ -1305,6 +1305,12 @@ class AppStrings {
   String get fileDownloaded =>
       _t('Fichier nettoyé téléchargé.', 'Clean file downloaded.',
           mg: 'Voasintona ny rakitra nodiovina.');
+  String get savedInDeganeoFolder => _t(
+      "Fichier nettoyé enregistré dans le dossier « Deganeo » de l'espace de "
+          'travail.',
+      'Clean file saved to the "Deganeo" folder of the workspace.',
+      mg: "Voatahiry ao amin'ny dossier \"Deganeo\" amin'ny toerana fiasana "
+          'ny rakitra nodiovina.');
   String get fileReplaced =>
       _t('Fichier original remplacé.', 'Original file replaced.',
           mg: 'Voasolo ny rakitra tany am-boalohany.');
@@ -1316,11 +1322,6 @@ class AppStrings {
           mg: '$ok zavatra nampidirina.')
       : _t('$ok importé(s), $failed échec(s).', '$ok imported, $failed failed.',
           mg: '$ok nampidirina, $failed tsy nahomby.');
-  String moveInReport(int ok, int failed) => failed == 0
-      ? _t('$ok élément(s) déplacé(s).', '$ok item(s) moved.',
-          mg: '$ok zavatra nafindra.')
-      : _t('$ok déplacé(s), $failed échec(s).', '$ok moved, $failed failed.',
-          mg: '$ok nafindra, $failed tsy nahomby.');
 
   // Search
   String get searchHint =>
@@ -1444,12 +1445,13 @@ class AppStrings {
   String get locationDownloads =>
       _t('Téléchargements', 'Downloads', mg: 'Fisintonana');
 
-  // iOS source choice (system pickers)
+  // Source choice before opening the phone's own pickers
   String get addFrom =>
       _t('Ajouter depuis', 'Add from', mg: 'Hanampy avy amin\'ny');
-  String get sourcePhotos =>
-      _t('Photothèque', 'Photo library', mg: 'Tahirin-tsary');
+  String get sourcePhotos => _t('Galerie', 'Gallery', mg: 'Tahirin-tsary');
   String get sourceFiles => _t('Fichiers', 'Files', mg: 'Rakitra');
+  String get sourceFolder =>
+      _t('Un dossier', 'A folder', mg: 'Lahatahiry iray');
   String nSelected(int n) =>
       _t('$n sélectionné(s)', '$n selected', mg: '$n voafantina');
   String get selectAll =>
@@ -1578,6 +1580,24 @@ class AppStrings {
       "Choisissez d'abord un dossier de travail (Accueil).",
       'Choose a workspace folder first (Home).',
       mg: 'Misafidiana laharana ho an\'ny asa aloha (Fandraisana).');
+
+  // Mandatory update (UpdateGate)
+  String get updateRequiredTitle => _t(
+        'Mise à jour obligatoire',
+        'Update required',
+        mg: 'Fanavaozana tsy maintsy atao',
+      );
+  String get updateRequiredBody => _t(
+        "Cette version d'Influencor n'est plus prise en charge. "
+            'Installez la dernière version pour continuer.',
+        'This version of Influencor is no longer supported. '
+            'Install the latest version to continue.',
+        mg: 'Tsy ampiasaina intsony ity dikan-teny Influencor ity. '
+            'Apetraho ny dikan-teny farany mba hanohizana.',
+      );
+  String get updateNow => _t('Mettre à jour', 'Update now', mg: 'Havaozina');
+  String get updateCheckAgain =>
+      _t('Vérifier à nouveau', 'Check again', mg: 'Hamarino indray');
 }
 
 /// Current app strings, following the concrete language chosen in settings.

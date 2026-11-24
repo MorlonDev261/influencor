@@ -35,14 +35,21 @@ class _Job {
 }
 
 /// The "Deganeo" tool: add up to [CleanerPage.maxFiles] photos / videos /
-/// PDFs of the workspace, inspect their metadata, strip it (one by one or all
-/// at once), verify each result with an independent re-scan, then save /
-/// replace / discard. Files from elsewhere on the device are refused: they
-/// must be imported into the library first.
+/// PDFs — from the workspace or from the phone (system gallery / file picker,
+/// drag & drop on desktop) — inspect their metadata, strip it (one by one or
+/// all at once), verify each result with an independent re-scan, then save /
+/// replace / discard.
+///
+/// Results always land in the workspace: for a workspace file, next to the
+/// original (or in its place); for a file from elsewhere, in the workspace's
+/// [deganeoFolder] folder — the original outside the app is never touched.
 class CleanerPage extends ConsumerStatefulWidget {
   const CleanerPage({super.key});
 
   static const maxFiles = 20;
+
+  /// Workspace folder receiving the cleaned files that come from outside it.
+  static const deganeoFolder = 'Deganeo';
 
   @override
   ConsumerState<CleanerPage> createState() => _CleanerPageState();
@@ -67,6 +74,8 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
     for (final job in _jobs) {
       _deleteTempSync(job.cleanPath);
     }
+    // Copies the system pickers made of the sources (Android / iOS).
+    unawaited(AppFilePicker.releaseTemporaryFiles());
     super.dispose();
   }
 
@@ -77,12 +86,11 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
       _snack(strings.needWorkspace);
       return;
     }
-    final paths = await AppFilePicker.pick(
+    final paths = await AppFilePicker.pickFromDevice(
       context,
       mode: PickMode.mediaFiles,
       title: strings.selectMediaTitle,
       allowMultiple: true,
-      root: root,
     );
     if (paths.isNotEmpty && mounted) _addPaths(paths);
   }
@@ -96,15 +104,9 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
     }
     final known = _jobs.map((j) => j.source).toSet();
     final fresh = <String>[];
-    var outside = 0;
     for (final path in paths) {
-      if (!isInWorkspace(root, path)) {
-        outside++;
-      } else if (_isMediaPath(path) && known.add(path)) {
-        fresh.add(path);
-      }
+      if (_isMediaPath(path) && known.add(path)) fresh.add(path);
     }
-    if (outside > 0) _snack(strings.outsideWorkspace(outside));
     if (fresh.isEmpty) return;
     final room = (CleanerPage.maxFiles - _jobs.length).clamp(0, 1 << 30);
     final accepted = fresh.take(room).toList();
@@ -185,22 +187,41 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
     }
   }
 
+  /// The workspace's "Deganeo" folder when [job] comes from outside the
+  /// workspace (its result cannot go next to it), otherwise null.
+  String? _externalTarget(_Job job) {
+    final root = ref.read(workspaceRootProvider);
+    if (root == null) throw StateError('no workspace');
+    if (isInWorkspace(root, job.source)) return null;
+    return p.join(root, CleanerPage.deganeoFolder);
+  }
+
   /// Writes the cleaned copy next to its original (same folder, `_clean`
-  /// suffix and the extension of its *real* format, never overwriting),
+  /// suffix and the extension of its *real* format, never overwriting) — or
+  /// into the "Deganeo" folder for a file from outside the workspace —,
   /// registers it in the gallery index so other apps (Facebook, WhatsApp...)
   /// list it, and refreshes the library.
-  Future<void> _saveCopy(_Job job) => ref
-      .read(libraryControllerProvider)
-      .storeCleaned(job.source, job.cleanPath!,
-          replace: false, parentDir: p.dirname(job.source));
+  Future<void> _saveCopy(_Job job) {
+    final controller = ref.read(libraryControllerProvider);
+    final external = _externalTarget(job);
+    if (external != null) {
+      return controller.storeCleanedIn(external, job.source, job.cleanPath!);
+    }
+    return controller.storeCleaned(job.source, job.cleanPath!,
+        replace: false, parentDir: p.dirname(job.source));
+  }
 
   Future<void> _download(_Job job) async {
     if (job.cleanPath == null) return;
     final strings = ref.read(appStringsProvider);
     try {
+      final external = _externalTarget(job) != null;
       await _saveCopy(job);
       await _eraseCleanCopy(job, showSnack: false);
-      if (mounted) _snack(strings.fileDownloaded);
+      if (mounted) {
+        _snack(
+            external ? strings.savedInDeganeoFolder : strings.fileDownloaded);
+      }
     } catch (_) {
       if (mounted) _snack(strings.genericError);
     }
@@ -228,6 +249,27 @@ class _CleanerPageState extends ConsumerState<CleanerPage> {
     if (clean == null) return;
     final source = job.source;
     final strings = ref.read(appStringsProvider);
+    final String? external;
+    try {
+      external = _externalTarget(job);
+    } catch (_) {
+      _snack(strings.genericError);
+      return;
+    }
+    if (external != null) {
+      // The original lives outside the app and stays untouched: the cleaned
+      // file takes its name in the workspace's "Deganeo" folder.
+      try {
+        await ref
+            .read(libraryControllerProvider)
+            .storeCleanedIn(external, source, clean, keepName: true);
+        await _eraseCleanCopy(job, showSnack: false);
+        if (mounted) _snack(strings.savedInDeganeoFolder);
+      } catch (_) {
+        if (mounted) _snack(strings.genericError);
+      }
+      return;
+    }
     try {
       // Copy next to the original, then swap with one rename (a failure
       // halfway never leaves the original truncated, nor a stray copy).

@@ -10,17 +10,20 @@ import '../widgets/empty_state.dart';
 import '../l10n/app_strings.dart';
 import 'pick_mode.dart';
 
-/// Opens the in-app file browser as a full-screen route and returns the chosen
-/// absolute paths (empty if cancelled). For [PickMode.directory] the list holds
-/// the single chosen folder. With [root], browsing is confined to that folder.
+/// Opens the in-app browser **of the workspace** as a full-screen route and
+/// returns the chosen absolute paths (empty if cancelled). For
+/// [PickMode.directory] the list holds the single chosen folder.
+///
+/// Browsing is always confined to [root] (the workspace): everything outside
+/// the app goes through the system pickers (see `AppFilePicker`).
 Future<List<String>> launchInAppBrowser(
   BuildContext context, {
   required PickMode mode,
+  required String root,
   bool allowMultiple = true,
   String? title,
   String? initialDirectory,
   String? actionLabel,
-  String? root,
 }) async {
   if (mode == PickMode.mediaFiles) {
     final result = await Navigator.of(context).push<List<String>>(
@@ -53,25 +56,6 @@ Future<List<String>> launchInAppBrowser(
   return result ?? const [];
 }
 
-Future<({List<String> paths, bool move})> launchInAppBrowserForImport(
-  BuildContext context, {
-  String? title,
-}) async {
-  final result =
-      await Navigator.of(context).push<({List<String> paths, bool move})>(
-    MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => _FileBrowserScreen(
-        mode: PickMode.files,
-        allowMultiple: true,
-        title: title,
-        showImportMoveActions: true,
-      ),
-    ),
-  );
-  return result ?? (paths: const <String>[], move: false);
-}
-
 class _FileBrowserScreen extends ConsumerStatefulWidget {
   const _FileBrowserScreen({
     required this.mode,
@@ -79,8 +63,7 @@ class _FileBrowserScreen extends ConsumerStatefulWidget {
     this.title,
     this.initialDirectory,
     this.actionLabel,
-    this.showImportMoveActions = false,
-    this.root,
+    required this.root,
   });
 
   final PickMode mode;
@@ -88,10 +71,9 @@ class _FileBrowserScreen extends ConsumerStatefulWidget {
   final String? title;
   final String? initialDirectory;
   final String? actionLabel;
-  final bool showImportMoveActions;
 
-  /// When set, nothing outside this folder can be browsed or chosen.
-  final String? root;
+  /// Nothing outside this folder (the workspace) can be browsed or chosen.
+  final String root;
 
   @override
   ConsumerState<_FileBrowserScreen> createState() => _FileBrowserScreenState();
@@ -134,7 +116,7 @@ class _MediaGalleryScreen extends ConsumerStatefulWidget {
     this.title,
     this.initialDirectory,
     this.actionLabel,
-    this.root,
+    required this.root,
   });
 
   final bool allowMultiple;
@@ -142,8 +124,8 @@ class _MediaGalleryScreen extends ConsumerStatefulWidget {
   final String? initialDirectory;
   final String? actionLabel;
 
-  /// When set, only the media of this folder (and its sub-folders) is shown.
-  final String? root;
+  /// Only the media of this folder (the workspace) and its sub-folders.
+  final String root;
 
   @override
   ConsumerState<_MediaGalleryScreen> createState() =>
@@ -174,50 +156,9 @@ class _MediaGalleryScreenState extends ConsumerState<_MediaGalleryScreen> {
     super.dispose();
   }
 
-  String _env(String key) => Platform.environment[key] ?? '';
-
   List<Directory> _roots() {
-    final seen = <String>{};
-    final dirs = <Directory>[];
-    void add(String path) {
-      if (path.isEmpty) return;
-      final dir = Directory(path);
-      if (!dir.existsSync()) return;
-      final normalized = p.normalize(dir.path);
-      if (seen.add(normalized)) dirs.add(Directory(normalized));
-    }
-
-    final root = widget.root;
-    if (root != null) {
-      add(root);
-      return dirs;
-    }
-
-    final initial = widget.initialDirectory;
-    if (initial != null && initial.isNotEmpty) add(initial);
-
-    if (Platform.isAndroid) {
-      const base = '/storage/emulated/0';
-      add('$base/DCIM');
-      add('$base/Pictures');
-      add('$base/Movies');
-      add('$base/Download');
-      add(base);
-    } else if (Platform.isWindows) {
-      final home = _env('USERPROFILE');
-      add(p.join(home, 'Pictures'));
-      add(p.join(home, 'Videos'));
-      add(p.join(home, 'Downloads'));
-      add(p.join(home, 'Desktop'));
-    } else {
-      final home = _env('HOME');
-      add(p.join(home, 'Pictures'));
-      add(p.join(home, 'Movies'));
-      add(p.join(home, 'Videos'));
-      add(p.join(home, 'Downloads'));
-      add(p.join(home, 'Desktop'));
-    }
-    return dirs;
+    final dir = Directory(p.normalize(widget.root));
+    return dir.existsSync() ? [dir] : const [];
   }
 
   Future<void> _scan() async {
@@ -684,96 +625,26 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
     );
   }
 
-  /// Inside [_FileBrowserScreen.root] (or anywhere when there is none).
+  /// Inside [_FileBrowserScreen.root] (the workspace).
   bool _allowed(String path) {
     final root = widget.root;
-    return root == null || p.equals(root, path) || p.isWithin(root, path);
+    return p.equals(root, path) || p.isWithin(root, path);
   }
 
-  /// At the top of what may be browsed: the root, or a drive / `/`.
-  bool _atTop(Directory dir) {
-    final root = widget.root;
-    if (root != null) return p.equals(root, dir.path);
-    return p.equals(dir.parent.path, dir.path);
-  }
+  /// At the top of what may be browsed: the workspace root.
+  bool _atTop(Directory dir) => p.equals(widget.root, dir.path);
 
   // --- Locations -------------------------------------------------------------
 
-  String _env(String key) => Platform.environment[key] ?? '';
-
-  String _initialDir() {
-    final root = widget.root;
-    if (root != null) return root;
-    if (Platform.isWindows) {
-      final home = _env('USERPROFILE');
-      if (home.isNotEmpty && Directory(home).existsSync()) return home;
-      return 'C:\\';
-    }
-    if (Platform.isAndroid) {
-      const internal = '/storage/emulated/0';
-      if (Directory(internal).existsSync()) return internal;
-      return '/';
-    }
-    final home = _env('HOME');
-    if (Platform.isIOS) {
-      // HOME is the app container; only Documents is the user's (and the
-      // folder the Files app shows as "On My iPhone > Influencor").
-      final documents = p.join(home, 'Documents');
-      if (Directory(documents).existsSync()) return documents;
-    }
-    if (home.isNotEmpty && Directory(home).existsSync()) return home;
-    return '/';
-  }
+  String _initialDir() => widget.root;
 
   List<_Shortcut> _buildShortcuts() {
     final strings = ref.read(appStringsProvider);
-    final out = <_Shortcut>[];
-    void add(String label, IconData icon, String path) {
-      if (path.isNotEmpty && Directory(path).existsSync()) {
-        out.add(_Shortcut(label, icon, path));
-      }
-    }
-
     final root = widget.root;
-    if (root != null) {
-      add(strings.workspaceFolder, Icons.folder_special_outlined, root);
-      return out;
-    }
-
-    if (Platform.isWindows) {
-      final home = _env('USERPROFILE');
-      add(strings.locationHome, Icons.home_outlined, home);
-      add(strings.locationDesktop, Icons.desktop_windows_outlined,
-          p.join(home, 'Desktop'));
-      add(strings.locationDocuments, Icons.description_outlined,
-          p.join(home, 'Documents'));
-      add(strings.locationDownloads, Icons.download_outlined,
-          p.join(home, 'Downloads'));
-      for (var c = 'A'.codeUnitAt(0); c <= 'Z'.codeUnitAt(0); c++) {
-        final letter = String.fromCharCode(c);
-        add('$letter:', Icons.storage_outlined, '$letter:\\');
-      }
-    } else if (Platform.isAndroid) {
-      const internal = '/storage/emulated/0';
-      add(strings.locationHome, Icons.smartphone_outlined, internal);
-      add(strings.locationDownloads, Icons.download_outlined,
-          '$internal/Download');
-      add('DCIM', Icons.photo_camera_outlined, '$internal/DCIM');
-      add(strings.images, Icons.image_outlined, '$internal/Pictures');
-    } else if (Platform.isIOS) {
-      add(strings.locationDocuments, Icons.smartphone_outlined,
-          p.join(_env('HOME'), 'Documents'));
-    } else {
-      final home = _env('HOME');
-      add(strings.locationHome, Icons.home_outlined, home);
-      add(strings.locationDesktop, Icons.desktop_mac_outlined,
-          p.join(home, 'Desktop'));
-      add(strings.locationDocuments, Icons.description_outlined,
-          p.join(home, 'Documents'));
-      add(strings.locationDownloads, Icons.download_outlined,
-          p.join(home, 'Downloads'));
-    }
-    return out;
+    if (root.isEmpty || !Directory(root).existsSync()) return const [];
+    return [
+      _Shortcut(strings.workspaceFolder, Icons.folder_special_outlined, root),
+    ];
   }
 
   // --- Loading ---------------------------------------------------------------
@@ -896,7 +767,7 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
     });
   }
 
-  Future<void> _confirmFiles({bool move = false}) async {
+  Future<void> _confirmFiles() async {
     final paths = _selected.toList();
     final accepted = <String>[];
     var rejected = 0;
@@ -912,11 +783,7 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
     }
     if (accepted.isEmpty) return;
     if (!mounted) return;
-    if (widget.showImportMoveActions) {
-      Navigator.of(context).pop((paths: accepted, move: move));
-    } else {
-      Navigator.of(context).pop(accepted);
-    }
+    Navigator.of(context).pop(accepted);
   }
 
   Future<bool> _isAcceptedForAction(String path) async {
@@ -1106,37 +973,6 @@ class _FileBrowserScreenState extends ConsumerState<_FileBrowserScreen> {
     }
     if (!_multi) return null; // single tap confirms directly
     final n = _selected.length;
-    if (widget.showImportMoveActions) {
-      return _BottomBar(
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: n == 0 ? null : () => _confirmFiles(),
-                icon: const Icon(Icons.upload_file_outlined),
-                label: Text(
-                  '${strings.importAction} ($n)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: n == 0 ? null : () => _confirmFiles(move: true),
-                icon: const Icon(Icons.drive_file_move_outlined),
-                label: Text(
-                  '${strings.move} ($n)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
     return _BottomBar(
       child: Row(
         children: [

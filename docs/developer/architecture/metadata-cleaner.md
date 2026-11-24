@@ -6,12 +6,21 @@ handlers, detector, pipeline), `application/` (isolate-backed service),
 (`metadata_leaks_test.dart` holds the regressions of metadata that used to
 survive a clean).
 
-**Scope:** Deganeo only takes files of the current workspace. The page's
-picker opens the in-app gallery confined to the workspace on every platform
-(`AppFilePicker.pick(root: …)`), dropped files from elsewhere are refused with
-a message (`isInWorkspace`), and cleaned copies are stored through
-`LibraryController.storeCleaned` so the library refreshes. Degany's
-`deganeo_*` tools follow the same rule.
+**Scope:** the Deganeo page takes files from anywhere through the system
+pickers (`AppFilePicker.pickFromDevice`: gallery or files on a phone, the file
+dialog on desktop) or drag & drop. The result is **always saved into the
+workspace**, with the usual two choices:
+
+| Source | Keep a copy / Download | Replace |
+|---|---|---|
+| in the workspace | `name_clean.ext` next to it (`storeCleaned`) | original swapped in place |
+| outside (phone, other disk) | `Deganeo/name_clean.ext` | `Deganeo/name.ext` (original outside untouched) |
+
+`Deganeo/` is created at the workspace root on first use
+(`CleanerPage.deganeoFolder`, `storeCleanedIn(keepName:)`); nothing is ever
+overwritten there (`name (2).ext`…). The library's one-image-at-a-time dialog
+(`showDeganeoCleanFlow`) only sees workspace files. Degany's `deganeo_*` tools
+still only take workspace files.
 
 ## Strategy: lossless, allowlist-based, verified
 

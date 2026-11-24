@@ -68,7 +68,8 @@ try {
   flutter build apk --release @defines @apkArgs
   if ($LASTEXITCODE -ne 0) { throw "APK (universal) build failed" }
   # Google Play build: without the Pôma reseller space (AppConstants.resellerEnabled).
-  flutter build appbundle --release @defines --dart-define=INFLUENCOR_RESELLER=false
+  # INFLUENCOR_CHANNEL=play : version minimale lue dans channels.play (UpdateGate).
+  flutter build appbundle --release @defines --dart-define=INFLUENCOR_RESELLER=false --dart-define=INFLUENCOR_CHANNEL=play
   if ($LASTEXITCODE -ne 0) { throw "AAB build failed" }
 
   if (-not $SkipWeb) {

@@ -14,10 +14,15 @@ function Get-ApkVersion([string]$Repo) {
 # Arguments `flutter build apk` (vide sans apk_version). Le dernier force le même
 # versionCode (= numéro de build) pour tous les APK par architecture, au lieu de
 # 1000 × ABI + build : arm64, armv7, x86_64 et universel ont tous le même numéro.
+#
+# Le canal `apk` est toujours ajouté : l'app lit alors `channels.apk.min_build`
+# dans app-version.json du site (UpdateGate), pas celui de Google Play.
 function Get-ApkBuildArgs([string]$Repo) {
+  $channel = '--dart-define=INFLUENCOR_CHANNEL=apk'
   $v = Get-ApkVersion $Repo
-  if (-not $v) { return @() }
+  if (-not $v) { return @($channel) }
   return @(
+    $channel,
     "--build-name=$($v.Name)",
     "--build-number=$($v.Number)",
     '--android-project-arg=force-version-code-ignoring-abi=true'

@@ -10,6 +10,7 @@ import 'constants/app_constants.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
 import 'theme/dialog_sizing.dart';
+import 'widgets/update_gate.dart';
 
 /// Root application widget.
 class ClipboardApp extends ConsumerWidget {
@@ -35,9 +36,11 @@ class ClipboardApp extends ConsumerWidget {
       routerConfig: router,
       builder: (context, child) => Theme(
         data: wideDialogTheme(context),
-        child: ResellerLinkHandler(
-          router: router,
-          child: child ?? const SizedBox.shrink(),
+        child: UpdateGate(
+          child: ResellerLinkHandler(
+            router: router,
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
       supportedLocales: const [Locale('fr'), Locale('en')],

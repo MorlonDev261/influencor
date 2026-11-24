@@ -146,11 +146,14 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
     final strings = ref.read(appStringsProvider);
     final paths = _selected.toList();
     if (paths.isEmpty) return;
+    final root = ref.read(workspaceRootProvider);
+    if (root == null) return;
     final dests = await AppFilePicker.pick(
       context,
       mode: PickMode.directory,
       title: strings.chooseDestination,
-      initialDirectory: ref.read(workspaceRootProvider) ?? _dir,
+      initialDirectory: _dir,
+      root: root,
     );
     if (dests.isEmpty) return;
     final dest = dests.first;
@@ -535,29 +538,29 @@ class _BrowseScreenState extends ConsumerState<BrowseScreen> {
   Future<void> _pickAndImport() async {
     final strings = ref.read(appStringsProvider);
 
-    final result = await AppFilePicker.pickForImport(
+    final paths = await AppFilePicker.pickForImport(
       context,
       title: strings.importFiles,
     );
 
-    if (result.paths.isNotEmpty) {
-      await _import(result.paths, move: result.move);
+    if (paths.isNotEmpty) {
+      await _import(paths);
+      // The phone's pickers hand over temporary copies: drop them once copied.
+      await AppFilePicker.releaseTemporaryFiles();
     }
   }
 
-  Future<void> _import(List<String> paths, {bool move = false}) async {
+  /// Copies [paths] into the current folder (the originals are not touched).
+  Future<void> _import(List<String> paths) async {
     final strings = ref.read(appStringsProvider);
 
     try {
-      final failed = await ref
-          .read(libraryControllerProvider)
-          .importPaths(_dir, paths, move: move);
+      final failed =
+          await ref.read(libraryControllerProvider).importPaths(_dir, paths);
 
       if (mounted) {
         final ok = paths.length - failed.length;
-        _snack(move
-            ? strings.moveInReport(ok, failed.length)
-            : strings.importReport(ok, failed.length));
+        _snack(strings.importReport(ok, failed.length));
       }
     } catch (_) {
       if (mounted) _snack(strings.genericError);
@@ -1361,10 +1364,14 @@ class _EntryMenu extends ConsumerWidget {
 
           case 'move':
             if (!context.mounted) return;
+            final root = ref.read(workspaceRootProvider);
+            if (root == null) return;
             final dests = await AppFilePicker.pick(
               context,
               mode: PickMode.directory,
               title: strings.chooseDestination,
+              initialDirectory: dir,
+              root: root,
             );
             if (dests.isNotEmpty && !p.equals(dests.first, dir)) {
               await ctrl.move(entry.path, dests.first, parentDir: dir);

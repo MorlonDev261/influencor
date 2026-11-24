@@ -293,9 +293,11 @@ class LibraryController {
   Future<String> storeCleanedIn(
     String dirPath,
     String sourcePath,
-    String cleanedTemp,
-  ) async {
-    final result = await _repo.storeCleanedIn(dirPath, sourcePath, cleanedTemp);
+    String cleanedTemp, {
+    bool keepName = false,
+  }) async {
+    final result = await _repo.storeCleanedIn(dirPath, sourcePath, cleanedTemp,
+        keepName: keepName);
     _ref.invalidate(directoryProvider(dirPath));
     _touchIndex();
     return result;
